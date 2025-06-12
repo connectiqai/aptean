@@ -35,7 +35,7 @@ tools = [
         "name": "get_support_case_information",
         "description": (
             "Analyze the support case details (subject, description, email conversation, and related posts) "
-            "and extract the root cause, resolution summary, and one high-level category."
+            "and extract the root cause, resolution summary, category, and related improvement opportunity."
         ),
         "strict": True,
         "parameters": {
@@ -69,12 +69,33 @@ tools = [
                         "Education",
                         "Process Improvement"
                     ]
+                },
+                "opportunity_name": {
+                    "type": "string",
+                    "description": (
+                        "A short and specific title with 2 words for the improvement opportunity, based on the category. "
+                        "For example:\n"
+                        "- For 'Automation': 'Auto-Assign User Roles'\n"
+                        "- For 'Education': 'Add Report Builder Training'\n"
+                        "- For 'Product Changes': 'Fix Date Field Validation'\n"
+                        "- For 'Process Improvement': 'Streamline Escalation Process'"
+                    )
+                },
+                "opportunity_summary": {
+                    "type": "string",
+                    "description": (
+                        "A concise summary describing the improvement opportunity based on the support case. "
+                        "It should align with the selected category (Automation, Product Changes, Education, or Process Improvement) "
+                        "and clearly explain how addressing the issue would reduce manual effort, prevent recurrence, enhance user experience, or improve efficiency."
+                    )
                 }
             },
             "required": [
                 "root_cause_summary",
                 "resolution_summary",
-                "category"
+                "category",
+                "opportunity_name",
+                "opportunity_summary"
             ],
             "additionalProperties": False
         }
@@ -337,7 +358,7 @@ def preprocessing(file_name):
         df.to_excel(output_file, index=False)
         logger.info(f"Results written to Excel: {output_file}")
 
-    except Exception as e:      
+    except Exception as e:
         logger.error(f"preprocessing : error: {e}")
 
     logger.info("Preprocessing complete.")
