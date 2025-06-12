@@ -333,7 +333,7 @@ def preprocessing(file_name):
             logger.info(f"LLM output: {llm_output}")
 
         df = pd.DataFrame(results)
-        output_file = "support_case_summary_500_new.xlsx"
+        output_file = "support_case_summary.xlsx"
         df.to_excel(output_file, index=False)
         logger.info(f"Results written to Excel: {output_file}")
 
