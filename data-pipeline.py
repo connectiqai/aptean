@@ -91,8 +91,10 @@ def get_db_connection():
         logger.error(f"get_db_connection error: {e}")
         return None
 
-def export_ross_case_numbers_to_excel():
+def export_ross_case_numbers_to_excel(product_name, file_name):
     try:
+        logger.info(f"Product Name - {product_name}")
+        
         with get_db_connection() as connection:
             if connection is None:
                 logger.error("DB connection failed. Aborting export.")
@@ -101,10 +103,10 @@ def export_ross_case_numbers_to_excel():
             with connection.cursor() as cursor:
                 cursor.execute("""
                     SELECT case_number FROM support_cases
-                    WHERE product_line = 'Ross'
+                    WHERE product_line = %s
                     ORDER BY RAND()
                     LIMIT 500
-                """)
+                """, (product_name,))
                 ross_cases = cursor.fetchall()
 
                 if not ross_cases:
@@ -112,18 +114,16 @@ def export_ross_case_numbers_to_excel():
                     return
 
                 case_df = pd.DataFrame(ross_cases)
-                case_df.to_excel("Ross_Case_Numbers.xlsx", index=False)
-                #case_df.to_excel("Made2Mange_Case_Numbers.xlsx", index=False)
-                logger.info("Export completed: Ross_Case_Numbers.xlsx")
-                #logger.info("Export completed: Made2Mange_Case_Numbers.xlsx")
+                
+                case_df.to_excel(file_name, index=False)
+                logger.info(f"Export completed: {file_name}")
 
     except Exception as e:
         logger.error(f"export_ross_case_numbers_to_excel error: {e}")
 
-def get_ross_case_data_from_excel():
+def get_ross_case_data_from_excel(file_name):
     try:
-        input_df = pd.read_excel("Ross_Case_Numbers.xlsx")
-        #input_df = pd.read_excel("Made2Mange_Case_Numbers.xlsx")
+        input_df = pd.read_excel(file_name)
         case_numbers = input_df['case_number'].dropna().astype(int).tolist()
 
         if not case_numbers:
@@ -141,7 +141,7 @@ def get_ross_case_data_from_excel():
                 # Fetch support cases
                 format_strings = ','.join(['%s'] * len(case_numbers))
                 cursor.execute(f"""
-                    SELECT case_number, subject, description
+                    SELECT case_number, subject, description, component_name, category_name
                     FROM support_cases
                     WHERE case_number IN ({format_strings})
                 """, tuple(case_numbers))
@@ -179,6 +179,8 @@ def get_ross_case_data_from_excel():
                         "case_number": case['case_number'],
                         "case_subject": case['subject'],
                         "case_desc": case['description'],
+                        "component_name":  case['component_name'],
+                        "category_name": case['category_name'],
                         "emails": emails.get(cn, []),
                         "posts": posts.get(cn, [])
                     })
@@ -251,9 +253,11 @@ def clean_support_email(text):
 
     return "\n".join(cleaned_lines)
 
-def preprocessing():        
+def preprocessing(file_name):        
     try:
-        case_list = get_ross_case_data_from_excel()
+        logger.info(f"File Name - {file_name}")
+
+        case_list = get_ross_case_data_from_excel(file_name)
         logger.info(f"Total cases retrieved: {len(case_list)}")
         if not case_list:
             return
@@ -317,11 +321,12 @@ def preprocessing():
 
                     results.append({
                         "case_number": case_number,
-                        "case_subject":case.get('case_subject', ''),
-                        "case_desc":case.get('case_desc', ''),
-                        #"root_cause_summary": llm_output.get("root_cause_summary", ""),
-                        #"resolution_summary": llm_output.get("resolution_summary", ""),
-                        "category":llm_output.get("category","")
+                        "component": case.get('component_name', ''),
+                        "category": case.get('category_name', ''),
+
+                        "root_cause_summary": llm_output.get("root_cause_summary", ""),
+                        "resolution_summary": llm_output.get("resolution_summary", ""),
+                        "insights":llm_output.get("category","")
                     })
 
 
@@ -338,5 +343,10 @@ def preprocessing():
     logger.info("Preprocessing complete.")
 
 if __name__ == "__main__":
-    preprocessing()
-    #export_ross_case_numbers_to_excel()
+
+    product_name = "Ross"
+    file_name = f"{product_name.lower()}_case_number_list.xlsx"
+
+    #export_ross_case_numbers_to_excel(product_name, file_name)
+    preprocessing(file_name)
+   
