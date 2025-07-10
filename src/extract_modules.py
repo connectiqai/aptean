@@ -13,12 +13,14 @@ from openai import OpenAI
 from PydanticAdaptorAnthropic import PydanticAdaptorAnthropic
 from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
 
+from scratchpad import get_case_info
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
 openai_client = OpenAI()
-adaptor = PydanticAdaptorOpenRouter(openai_cient=openai_client)
+adaptor = PydanticAdaptorOpenRouter(openai_client=openai_client)
 
 
 tag_info = """Here is some context on the different pieces of information you may be given
@@ -122,239 +124,36 @@ def get_case_module(row):
 
     return case_module_extractor_dict
 
+def add_case_modules_df(df):
+    # extract module name for alll cases
+    case_module_extraction_list = []
+    with ThreadPoolExecutor(max_workers=42) as executor:
+        # Start the load operations and mark each future with its URL
+        case_module_extraction_futures_list = [executor.submit(get_case_module, row) for _, row in df.iterrows()]
+        for future in tqdm(as_completed(case_module_extraction_futures_list), total=len(case_module_extraction_futures_list)):
+            case_module_extraction = future.result()
+            case_module_extraction_list.append(case_module_extraction)
 
-initial_module_names_list = [
-    "Process Manufacturing",
-    "General Ledger",
-    "Purchase Order Processing",
-    "Inventory Control",
-    "Data Manager Component",
-    "Process Planning",
-    "Customizations",
-    "Accounts Receivable",
-    "Applications",
-    "Accounts Payables",
-    "Sales Order Processing",
-    "SCP",
-    "Reporting Services",
-    "Materials Management",
-    "Supply Chain Planning (SCP)",
-    "Resource Planning Management (RPM)",
-    "Maintenance Manager",
-    "Fixed Assets",
-    "Accounts Payable",
-    "System Manager",
-    "Credential Management",
-    "Data Collection",
-    "User Management",
-    "Project Accounting",
-    "Enterprise Viewer",
-    "Quality Control Management",
-    "Trade Promotions",
-    "Recipe Management",
-    "Quality Management",
-    "Cost Management",
-    "Platform",
-    "Quality Control",
-    "Advanced Planning and Scheduling (APS)",
-    "Security Manager",
-    "TraceExpress",
-    "Trace Express",
-    "Reporting Services Reports",
-    "EDI",
-    "SCP (Supply Chain Planning)",
-    "Security Management",
-    "Product Costing",
-    "Email Integration",
-    "Accounts Payable / Accounts Receivable",
-    "Security and Auditing",
-    "Campaign Management",
-    "Product Master",
-    "Manufacturing Inquiries",
-    "Document Management",
-    "EMF Processes",
-    "EMF",
-    "Database Management",
-    "Shipping Management",
-    "Advanced Reporting",
-    "Shipping and Order Processing",
-    "ERP",
-    "Mobile Applications",
-    "Product Master Maintenance",
-    "Web Service Module",
-    "Sales Analysis",
-    "User Setup",
-    "License Management",
-    "Printing Services",
-    "Ross Mobile Browser",
-    "Contract Management",
-    "Advanced Planning and Scheduling",
-    "User Interface",
-    "User Account Management",
-    "Intercompany Subledger",
-    "ERP Services",
-    "Facilities Management",
-    "Tabware",
-    "General Business Kit",
-    "Customer Management",
-    "Job Management",
-    "User Accounts Management",
-    "Ross",
-    "Batch Processing",
-    "Costing",
-    "Manufacturing",
-    "Job Costing",
-    "IAF",
-    "Services",
-    "User Configuration Management",
-    "Product Maintenance",
-    "MRP",
-    "Label Management",
-    "IAF Manager",
-    "Product Lifecycle Management",
-    "Configuration Management",
-    "Ross ERP",
-    "Product Inquiry",
-    "ERP Administration",
-    "Company Controls",
-    "Currency Management",
-    "Accounts Receivable / Accounts Payable",
-    "MRP (Material Requirements Planning)",
-    "Process Control",
-    "F&B (cWMS Integration)",
-    "Software Compatibility",
-    "User Security Management",
-    "Licensing Management",
-    "Shipping Order Processing",
-    "User Authentication",
-    "Demand Planning",
-    "Customer Service",
-    "Label Printing",
-    "User Access Management",
-    "User Profile",
-    "Web Services",
-    "Event Management Framework (EMF)",
-    "Content Management",
-    "Pyramid Module",
-    "Cash Management",
-    "Print Services",
-    "Quality Assurance / Testing",
-    "Accounts Maintenance",
-    "RPM",
-    "Mobile Transaction Processing",
-    "Aptean Connect OATKA",
-    "Batch Manager",
-    "Data Warehouse",
-    "Traceability",
-    "Financials",
-    "Cost Accounting",
-    "Print Management",
-    "Software License Management",
-    "User Access",
-    "Scheduling",
-    "Aptean Connect",
-    "Accounts",
-    "Warehouse Management",
-    "BPM",
-    "Webdesktop Configuration",
-    "Product Support Life",
-    "Configuration Tool",
-    "Process Accounting",
-    "Product Allocation",
-    "WebDesktop",
-    "Customer Master",
-    "Localization",
-    "ROSS",
-    "Shipping and Logistics",
-    "Sales Forecasting",
-    "Text Formatter",
-    "Certified Extension",
-    "Shipping and Logistics Management",
-    "User Administration",
-    "Shipping",
-    "Data Management",
-    "Mobile IAF",
-    "Financial Security Management",
-    "Shipping Operations",
-    "Supply Chain Planning",
-    "Product Management",
-    "Company Setup",
-    "Accounts Management",
-    "Shipping and Invoicing",
-    "Process Management",
-    "Inventory Control, Process Manufacturing, Purchase Order Processing, Sales Order Processing",
-    "Integration Services",
-    "Warehouse Transfer Receipt",
-    "Transportation Management",
-    "Aptean Ross",
-    "Cloud Printing",
-    "Labor Management",
-    "SaaS",
-    "RUN EXECUTABLE",
-    "Security Controls",
-    "Aptean Cloud Reporting",
-    "Metadata Management",
-    "User Security",
-    "Case Management",
-    "Cloud Printing Services",
-    "Supplier Management",
-    "e-Signature Management",
-    "Web Services Module",
-    "Accounts Payables and Accounts Receivables",
-    "Job Accounting",
-    "User Setup and Security Manager",
-    "Printing and Label Management",
-    "Production Planning",
-    "Metadata Manager",
-    "Warehouse Management System",
-    "IAF File Manager",
-    "Job Inquiry",
-    "Routing & Scheduling",
-    "Shipping and Order Management",
-    "Purchasing",
-    "Self-Service",
-    "Licensing",
-    "Job Scheduling",
-    "Aptean Analytics",
-    "Account Security",
-    "Mobile/Modern",
-    "Webdesktop",
-    "Action Center",
-    "Support Services",
-    "Accounts Payables / Accounts Receivable",
-    "Planning",
-    "Shipping and Distribution",
-    "Weigh & Dispense",
-    "IAF Management",
-    "Job Control",
-    "Shipping and Dispatch Management",
-    "Lock Manager",
-    "Reconciliation Module",
-    "Despatch Management",
-    "User Access and Security Manager",
-    "Transfer Order Processing",
-    "Weigh and Dispense",
-    "Shipping and Inventory Management",
-    "Cloud Reporting",
-    "Lock Management",
-    "User Access Setup",
-    "Advanced Pricing",
-    "User Setup and Security",
-    "Product Master Management",
-    "Accounts Payable and Accounts Receivable",
-    "Disaster Recovery",
-    "Facility Management",
-    "Banking Module",
-    "User Authentication Management",
-    "Graphical Scheduling",
-    "Distribution Center (DC) Module",
-    "CASH",
-    "Job Reporting",
-    "User Personalization",
-    "BPO",
-    "Pharmacy License Management",
-    "Job Processing"
-]
+    case_module_reasoning_list = []
+    case_module_name_list = []
+    for case_classification_dict in case_module_extraction_list:
+        reasoning = case_classification_dict['reasoning']
+        module_name = case_classification_dict['module_name']
+        
+        case_module_reasoning_list.append(reasoning)
+        case_module_name_list.append(module_name)
+
+    df.loc[:, 'module_name_reasoning'] = case_module_reasoning_list
+    df.loc[:, 'module_name'] = case_module_name_list
+
+    return df
+
+
+
+
+
+
+
 
 same_module_name_analysis_prompt_template = """You are given a set of module names referring to different modules in a ERP product 
 Sometimes, the multiple names in the given list refer to the same module in the ERP product and sometimes they refer to different modules in the ERP product. 
@@ -547,8 +346,6 @@ def get_module_group2module_names(module_name_clustering: ModuleNameClustering):
 def get_module_names2module_group(module_group2module_names):
     module_names2module_group = {}
     for module_group, group_module_name_list in module_group2module_names.items():
-        if group_module_name_list is None:
-            print(module_group, group_module_name_list)
         for module_name in group_module_name_list:
             module_names2module_group[module_name] = module_group
     return module_names2module_group
@@ -560,8 +357,6 @@ def extend_module_group2module_names(module_group2module_names, module_name_grou
             group_name = module_group.combined_name
             group_module_name_list = module_group.name_list
             
-            if group_module_name_list is None:
-                print(group_name, group_module_name_list)
             #TODO catch this situation properlyt and fix it. should never happen.
             if group_name in module_group2module_names:
                 module_group2module_names[group_name] = module_group2module_names[group_name].extend(group_module_name_list)
@@ -571,10 +366,7 @@ def extend_module_group2module_names(module_group2module_names, module_name_grou
             group_name = module_group.group_name
             group_module_name_list = module_group.name_list
 
-            if group_module_name_list is None:
-                print(group_module_name_list)
-
-            if group_name not in module_group_names_list:
+            if group_name not in module_group2module_names:
                 print('THis is not a valid group name', group_name, group_module_name_list)
                 pass
             else:
@@ -584,67 +376,16 @@ def extend_module_group2module_names(module_group2module_names, module_name_grou
 
 
 
+def deduplicate_case_module_names(df):
+    initial_module_names_list = df["module_name"].unique()
 
-
-
-
-if __name__ == "__main__":
-    # INPUT -> top level classify excel
-    # OUTPUT -> Module name for everything excel
-
-    # extract all module names
-    # deduplicate module names
-
-
-    # ROSS
-    path = "/workspace/aptean/src/top_level_classify.xlsx"
-
-    # Made 2 Manage
-    # path = "/Users/suryakrishnan/Documents/GitHub/aptean/excel_experiment/Made2Manage_case_list.xlsx"
-
-    df = pd.read_excel(path)
-
-
-    # category_col_name = "category_name"
-    # category_vals = ['Integration', 'Technical Error', 'Feature Enhancement', 'Module Issue', 'Admin Issue', 'Other']
-    # rows_to_extract = df[category_col_name] == 'Module Issue'
-    # filtered_df = df.loc[rows_to_extract]
-    filtered_df = df.iloc[:]
-    print(len(filtered_df))
-
-
-
-    # extract module name for alll cases
-    case_module_extraction_list = []
-    with ThreadPoolExecutor(max_workers=42) as executor:
-        # Start the load operations and mark each future with its URL
-        case_module_extraction_futures_list = [executor.submit(get_case_module, row) for _, row in filtered_df.iterrows()]
-        for future in tqdm(as_completed(case_module_extraction_futures_list), total=len(case_module_extraction_futures_list)):
-            case_module_extraction = future.result()
-            case_module_extraction_list.append(case_module_extraction)
-
-    case_module_reasoning_list = []
-    case_module_name_list = []
-    for case_classification_dict in case_module_extraction_list:
-        reasoning = case_classification_dict['reasoning']
-        module_name = case_classification_dict['module_name']
-        
-        case_module_reasoning_list.append(reasoning)
-        case_module_name_list.append(module_name)
-
-    filtered_df.loc[:, 'module_name_reasoning'] = case_module_reasoning_list
-    filtered_df.loc[:, 'module_name'] = case_module_name_list
-
-    filtered_df.to_excel('extract_module.xlsx')
-
-
-    # deduplicate module names
     module_name_clustering_model = cluster_initial_module_names(initial_module_names_list)
     module_group2module_names = get_module_group2module_names(module_name_clustering_model)
     missing_module_names_list = get_missing_module_names_list(initial_module_names_list, module_group2module_names)
     print(f"missing_module_names_list - {missing_module_names_list}")
     print(f"len missing module name - {len(missing_module_names_list)}")
     print("-" * 25)
+
     while len(missing_module_names_list) > 0:
         module_group_names_list = list(module_group2module_names.keys())
         module_name_group_allocation_model = add_missing_module_groups(missing_module_names_list, module_group_names_list)
@@ -655,7 +396,43 @@ if __name__ == "__main__":
         print(f"missing_module_names_list - {missing_module_names_list}")
         print(f"len missing module name - {len(missing_module_names_list)}")
         print("-" * 25)
+    
+
+    module_names2module_group = get_module_names2module_group(module_group2module_names)
+    deduplicated_module_names_list = []
+    for _, row in df.iterrows():
+        module_name = row["module_name"]
+        deduplicated_module_name = module_names2module_group[str(module_name)]
+        deduplicated_module_names_list.append(deduplicated_module_name)
+    
+    df["deduplicated_module_name"] = np.array(deduplicated_module_names_list)
+
+    return df
 
 
-    with open('module_group2module_names.json', 'w') as f:
-        json.dump(module_group2module_names, f, indent=4)
+
+if __name__ == "__main__":
+
+    # ROSS
+    # path = "/Users/suryakrishnan/Documents/GitHub/aptean/src/top_level_classify.xlsx"
+    path = "/Users/suryakrishnan/Documents/GitHub/aptean/src/ROSS_case_list.xlsx"
+
+    df = pd.read_excel(path)
+    filtered_df = df.iloc[:100]
+
+    # Get all case modules
+    module_names_df = add_case_modules_df(filtered_df)
+
+    print("num initial module names list", len(module_names_df["module_name"].unique()))
+    print("initial module names list", module_names_df["module_name"].unique())
+
+    print(f"\n\n{'-' * 25}\n\n")
+
+    # deduplicate module names
+    deduplicated_module_names_df = deduplicate_case_module_names(module_names_df)
+
+    print("num final module names list", len(deduplicated_module_names_df['deduplicated_module_name'].unique()))
+    print("final module names list", deduplicated_module_names_df['deduplicated_module_name'].unique())
+
+    print(f"\n\n{'-' * 25}\n\n")
+
