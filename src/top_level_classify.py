@@ -1,32 +1,14 @@
-import pandas as pd
-import numpy as np
-
-from pathlib import Path
-import shutil
-import sklearn.cluster
 from tqdm import tqdm
 
+import pandas as pd
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import partial
 
-import requests
-import anthropic
 from openai import OpenAI
-import voyageai
-import voyageai.client
-from google import genai
-from google.genai import types
-import cohere
-
-import sklearn
-
-import time
-import json
-import os
 
 from pydantic import BaseModel, Field
-from PydanticAdaptorAnthropic import PydanticAdaptorAnthropic
 from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
+
 
 from typing import Literal, Optional
 from scratchpad import get_case_info
@@ -98,21 +80,6 @@ Thoroughly analyze the case details and categorize them according to the categor
 """
 
 
-
-
-# ROSS
-path = "/workspace/aptean/src/ROSS_case_list.xlsx"
-
-# Made 2 Manage
-# path = "/Users/suryakrishnan/Documents/GitHub/aptean/excel_experiment/Made2Manage_case_list.xlsx"
-
-df = pd.read_excel(path)
-# print(len(df))
-# print(df.columns)
-
-filtered_df = df.iloc[:]
-
-
 openai_client = OpenAI()
 adaptor = PydanticAdaptorOpenRouter(openai_client=openai_client)
 
@@ -146,43 +113,47 @@ def classify_case(row):
     return case_categorization_dict
 
 
+def add_case_classification_df(df):
+    case_classification_list = []
+    with ThreadPoolExecutor(max_workers=42) as executor:
+        case_classification_futures = [executor.submit(classify_case, row) for _, row in df.iterrows()]
+        for future in tqdm(as_completed(case_classification_futures), total=len(case_classification_futures)):
+            case_classification = future.result()
+            case_classification_list.append(case_classification)
+
+    case_classification_reasoning_list = []
+    case_category_name_list = []
+    case_new_category_name_list = []
+    for case_classification_dict in case_classification_list:
+        reasoning = case_classification_dict['reasoning']
+        category = case_classification_dict['category']
+        new_category_name = case_classification_dict['new_category_name']
+        
+        case_classification_reasoning_list.append(reasoning)
+        case_category_name_list.append(category)
+        case_new_category_name_list.append(new_category_name)
+
+    df.loc[:, 'category_reasoning'] = case_classification_reasoning_list
+    df.loc[:, 'category_name'] = case_category_name_list
+    df.loc[:, 'new_category_name'] = case_new_category_name_list
+
+    return df
 
 
-# classify all cases
-case_classification_list = []
-with ThreadPoolExecutor(max_workers=42) as executor:
-    # Start the load operations and mark each future with its URL
-    case_classification_futures = [executor.submit(classify_case, row) for _, row in filtered_df.iterrows()]
-    for future in tqdm(as_completed(case_classification_futures), total=len(case_classification_futures)):
-        case_classification = future.result()
-        case_classification_list.append(case_classification)
+if __name__ == "__main__":
 
-case_classification_reasoning_list = []
-case_category_name_list = []
-case_new_category_name_list = []
-for case_classification_dict in case_classification_list:
-    reasoning = case_classification_dict['reasoning']
-    category = case_classification_dict['category']
-    new_category_name = case_classification_dict['new_category_name']
-    
-    case_classification_reasoning_list.append(reasoning)
-    case_category_name_list.append(category)
-    case_new_category_name_list.append(new_category_name)
+    # ROSS
+    path = "/Users/suryakrishnan/Documents/GitHub/aptean/ROSS_case_list.xlsx"
 
-filtered_df.loc[:, 'category_reasoning'] = case_classification_reasoning_list
-filtered_df.loc[:, 'category_name'] = case_category_name_list
-filtered_df.loc[:, 'new_category_name'] = case_new_category_name_list
+    df = pd.read_excel(path)
+    filtered_df = df.iloc[:100]
 
-filtered_df.to_excel('top_level_classify.xlsx')
+    # classify all cases
+    case_classification_df = add_case_classification_df(filtered_df)
 
-print(filtered_df["category_name"].value_counts())
-print(filtered_df["new_category_name"].value_counts())
+    dst_path = "/Users/suryakrishnan/Documents/GitHub/aptean/scratchpad_data/top_level_classify.xlsx"
+    case_classification_df.to_excel(dst_path)
 
-# print(len(case_summary_list))
-
-# with open(case_summary_list_filepath, 'w') as f:
-#     json.dump(case_summary_list, f, indent=4)
-
-# case_number_list = [row['Case Number'] for _, row in filtered_df.iterrows()]
-# with open(case_number_filepath, 'w') as f:
-#     json.dump(case_number_list, f, indent=4)
+    print("category name counts", case_classification_df["category_name"].value_counts())
+    print("new category name counts", case_classification_df["new_category_name"].value_counts())
+    print(f"\n\n{'-' * 25}\n\n")
