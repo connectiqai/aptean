@@ -4,6 +4,10 @@ import copy
 import anthropic
 from pydantic import ValidationError
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 class PydanticAdaptorAnthropic:
 
     def __init__(self, anthropic_client=None, anthropic_api_key=None) -> None:
