@@ -11,7 +11,7 @@ from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
 
 
 from typing import Literal, Optional
-from scratchpad import get_case_info
+from cluster_case_summaries import get_case_info
 
 
 categories_info = """
@@ -115,10 +115,14 @@ def classify_case(row):
 
 def add_case_classification_df(df):
     case_classification_list = []
+    case_idx_list = []
     with ThreadPoolExecutor(max_workers=42) as executor:
-        case_classification_futures = [executor.submit(classify_case, row) for _, row in df.iterrows()]
-        for future in tqdm(as_completed(case_classification_futures), total=len(case_classification_futures)):
+        case_classification_futures2idx = {executor.submit(classify_case, row): row_idx for row_idx, row in df.iterrows()}
+        for future in tqdm(as_completed(case_classification_futures2idx), total=len(case_classification_futures2idx)):
+            case_idx = case_classification_futures2idx[future]
             case_classification = future.result()
+
+            case_idx_list.append(case_idx)
             case_classification_list.append(case_classification)
 
     case_classification_reasoning_list = []
@@ -133,9 +137,9 @@ def add_case_classification_df(df):
         case_category_name_list.append(category)
         case_new_category_name_list.append(new_category_name)
 
-    df.loc[:, 'category_reasoning'] = case_classification_reasoning_list
-    df.loc[:, 'category_name'] = case_category_name_list
-    df.loc[:, 'new_category_name'] = case_new_category_name_list
+    df.loc[case_idx_list, 'category_reasoning'] = case_classification_reasoning_list
+    df.loc[case_idx_list, 'category_name'] = case_category_name_list
+    df.loc[case_idx_list, 'new_category_name'] = case_new_category_name_list
 
     return df
 
@@ -143,7 +147,7 @@ def add_case_classification_df(df):
 if __name__ == "__main__":
 
     # ROSS
-    path = "/Users/suryakrishnan/Documents/GitHub/aptean/ROSS_case_list.xlsx"
+    path = "/workspace/aptean/ROSS_case_list.xlsx"
 
     df = pd.read_excel(path)
     filtered_df = df.iloc[:100]
@@ -151,7 +155,7 @@ if __name__ == "__main__":
     # classify all cases
     case_classification_df = add_case_classification_df(filtered_df)
 
-    dst_path = "/Users/suryakrishnan/Documents/GitHub/aptean/scratchpad_data/top_level_classify.xlsx"
+    dst_path = "/workspace/aptean/scratchpad_data/top_level_classify.xlsx"
     case_classification_df.to_excel(dst_path)
 
     print("category name counts", case_classification_df["category_name"].value_counts())

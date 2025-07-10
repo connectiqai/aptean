@@ -13,7 +13,7 @@ from openai import OpenAI
 from PydanticAdaptorAnthropic import PydanticAdaptorAnthropic
 from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
 
-from scratchpad import get_case_info
+from cluster_case_summaries import get_case_info
 
 from dotenv import load_dotenv
 
@@ -127,11 +127,14 @@ def get_case_module(row):
 def add_case_modules_df(df):
     # extract module name for alll cases
     case_module_extraction_list = []
+    case_module_idx_list = []
     with ThreadPoolExecutor(max_workers=42) as executor:
-        # Start the load operations and mark each future with its URL
-        case_module_extraction_futures_list = [executor.submit(get_case_module, row) for _, row in df.iterrows()]
-        for future in tqdm(as_completed(case_module_extraction_futures_list), total=len(case_module_extraction_futures_list)):
+        case_module_futures2idx = {executor.submit(get_case_module, row) : row_idx for row_idx, row in df.iterrows()}
+        for future in tqdm(as_completed(case_module_futures2idx), total=len(case_module_futures2idx)):
+            case_module_idx = case_module_futures2idx[future]
             case_module_extraction = future.result()
+
+            case_module_idx_list.append(case_module_idx)
             case_module_extraction_list.append(case_module_extraction)
 
     case_module_reasoning_list = []
@@ -143,8 +146,8 @@ def add_case_modules_df(df):
         case_module_reasoning_list.append(reasoning)
         case_module_name_list.append(module_name)
 
-    df.loc[:, 'module_name_reasoning'] = case_module_reasoning_list
-    df.loc[:, 'module_name'] = case_module_name_list
+    df.loc[case_module_idx_list, 'module_name_reasoning'] = case_module_reasoning_list
+    df.loc[case_module_idx_list, 'module_name'] = case_module_name_list
 
     return df
 
@@ -263,10 +266,6 @@ def cluster_initial_module_names(module_names_list) -> ModuleNameClustering:
     )
 
     raw_model_grouping_text = raw_module_grouping_response.choices[0].message.content
-    
-    #TODO remove this just for debugging
-    with open("raw_model_grouping_text.md", "w") as f:
-        f.write(raw_model_grouping_text)
 
     assistant_message = {
         "role": "assistant",
@@ -415,7 +414,7 @@ if __name__ == "__main__":
 
     # ROSS
     # path = "/Users/suryakrishnan/Documents/GitHub/aptean/src/top_level_classify.xlsx"
-    path = "/Users/suryakrishnan/Documents/GitHub/aptean/src/ROSS_case_list.xlsx"
+    path = "/workspace/aptean/ROSS_case_list.xlsx"
 
     df = pd.read_excel(path)
     filtered_df = df.iloc[:100]
