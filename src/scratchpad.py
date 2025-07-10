@@ -28,15 +28,19 @@ from pydantic import BaseModel, Field
 from PydanticAdaptorAnthropic import PydanticAdaptorAnthropic
 from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
 
-# ROSS
-path = "/workspace/ROSS_case_list.xlsx"
+from dotenv import load_dotenv
 
-# Made 2 Manage
-# path = "/Users/suryakrishnan/Documents/GitHub/aptean/excel_experiment/Made2Manage_case_list.xlsx"
+load_dotenv()
 
-df = pd.read_excel(path)
-# print(len(df))
-# print(df.columns)
+# # ROSS
+# path = "/workspace/ROSS_case_list.xlsx"
+
+# # Made 2 Manage
+# # path = "/Users/suryakrishnan/Documents/GitHub/aptean/excel_experiment/Made2Manage_case_list.xlsx"
+
+# df = pd.read_excel(path)
+# # print(len(df))
+# # print(df.columns)
 
 
 
@@ -75,7 +79,7 @@ def make_ollama_request(prompt):
 def make_openrouter_request(prompt):
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key="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"
+        # pass api_key here or set it in env
     )
 
     resp = client.chat.completions.create(
@@ -194,7 +198,7 @@ def get_case_summary(case_info_dirpath, row):
 
     return model_summary_response
 
-vo = voyageai.Client(api_key="pa-tv-kKXJtiZmXlgCLG-DZ2C92lwJcTVfwOcjO430S6oQ")
+vo = voyageai.Client()
 def embed_case_summary(case_summary_path):
     with open(case_summary_path) as f:
         case_summary = f.read()
@@ -209,7 +213,7 @@ def embed_case_summary(case_summary_path):
     embedding = embed_result.embeddings[0]
     return embedding
 
-genai_client = genai.Client(api_key="AIzaSyA7BM8OSs-pko8BPf-phjYxzjKgxpGntiY")
+genai_client = genai.Client()
 def gemini_embed_case_summary(case_summary_path):
     with open(case_summary_path) as f:
         case_summary = f.read()
@@ -264,7 +268,7 @@ def cohere_embed_case_summary(case_summary_path):
 # exit()
 
 
-filtered_df = df.iloc[:5000]
+# filtered_df = df.iloc[:5000]
 
 # # get all case summary
 
@@ -517,7 +521,7 @@ filtered_df = df.iloc[:5000]
 #     reasoning: str = Field(..., description="Reasoning behind your decision on whether the two given clusters should be merged into one or not")
 #     should_be_merged: bool = Field(..., description="Should the given two clusters be merged into one or not")
 
-# adaptor = PydanticAdaptorOpenRouter(openai_api_key="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")
+# adaptor = PydanticAdaptorOpenRouter()
 
 # # iterate through find yes, merge build one
 # cluster_info_items = list(cluster_id2info.items())

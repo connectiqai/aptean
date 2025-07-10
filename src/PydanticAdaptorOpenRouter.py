@@ -7,16 +7,20 @@ from pydantic import ValidationError
 
 from openai import OpenAI
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 class PydanticAdaptorOpenRouter:
 
-    def __init__(self, openai_cient=None, openai_api_key=None) -> None:
-        if openai_cient is not None:
-            self.openai_cient = openai_cient
+    def __init__(self, openai_client=None, openai_api_key=None) -> None:
+        if openai_client is not None:
+            self.openai_client = openai_client
         else:
             if openai_api_key is None:
-                self.openai_cient = OpenAI(base_url="https://openrouter.ai/api/v1")
+                self.openai_client = OpenAI(base_url="https://openrouter.ai/api/v1")
             else:
-                self.openai_cient = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openai_api_key)
+                self.openai_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openai_api_key)
     
     @property
     def chat(self):
@@ -140,7 +144,7 @@ class PydanticAdaptorOpenRouter:
                     formatted_kwargs["messages"] = updated_message        
 
                 # make the anthropic call
-                chat_completions_response = self.openai_cient.chat.completions.create(
+                chat_completions_response = self.openai_client.chat.completions.create(
                     **formatted_kwargs
                 )            
 
@@ -183,7 +187,7 @@ if __name__ == "__main__":
         step_description: str = Field(description="one line textual description of the next step")
     
 
-    adaptor = PydanticAdaptorOpenRouter(openai_api_key="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")
+    adaptor = PydanticAdaptorOpenRouter()
 
     content = [{"type": "text", "text": "Help the user achieve their goal."}]
 
@@ -197,12 +201,11 @@ if __name__ == "__main__":
     response = adaptor.chat.completions.create(
         pydantic_model=NextStepAnswer,
         num_retries=1,
-        model="meta-llama/llama-4-maverick",
+        # model="meta-llama/llama-4-maverick",
+        model="openai/gpt-4o-mini",
         messages=message_history,
         max_tokens=4096,
         stream=False
     )
 
     print(f"{response=}")
-
-

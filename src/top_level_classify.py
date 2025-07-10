@@ -101,7 +101,7 @@ Thoroughly analyze the case details and categorize them according to the categor
 
 
 # ROSS
-path = "/workspace/ROSS_case_list.xlsx"
+path = "/workspace/aptean/src/ROSS_case_list.xlsx"
 
 # Made 2 Manage
 # path = "/Users/suryakrishnan/Documents/GitHub/aptean/excel_experiment/Made2Manage_case_list.xlsx"
@@ -110,9 +110,11 @@ df = pd.read_excel(path)
 # print(len(df))
 # print(df.columns)
 
-filtered_df = df.iloc[:1]
+filtered_df = df.iloc[:]
 
 
+openai_client = OpenAI()
+adaptor = PydanticAdaptorOpenRouter(openai_client=openai_client)
 
 class CaseCategorization(BaseModel):
     """This data model captures your response of categorizing the issue according to the instructions in the prompt. Be extremely thoughtful and accurate"""
@@ -120,10 +122,8 @@ class CaseCategorization(BaseModel):
     category: Literal['Integration', 'Technical Error', 'Feature Enhancement', 'Module Issue', 'Admin Issue', 'Other']
     new_category_name: Optional[str] = Field(None, description="Only use this if you selected category as other. Provide the category that we should add to capture the class of issues represented by this issue.")
 
-adaptor = PydanticAdaptorOpenRouter(openai_api_key="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")
 def classify_case(row):
     case_info = get_case_info(row)
-
     case_classification_prompt = prompt_template.format(categories_info=categories_info, tag_info=tag_info, case_info=case_info)
 
     content = [{"type": "text", "text": case_classification_prompt}]
@@ -135,7 +135,7 @@ def classify_case(row):
     case_categorization = adaptor.chat.completions.create(
         pydantic_model=CaseCategorization,
         num_retries=5,
-        model="openai/gpt-4o-mini",
+        model="gpt-4o-mini",
         messages=message_history,
         max_tokens=4096,
         stream=False
@@ -144,7 +144,6 @@ def classify_case(row):
     case_categorization_dict = case_categorization.model_dump()
 
     return case_categorization_dict
-
 
 
 
@@ -170,11 +169,14 @@ for case_classification_dict in case_classification_list:
     case_category_name_list.append(category)
     case_new_category_name_list.append(new_category_name)
 
-filtered_df.loc['category_reasoning'] = case_classification_reasoning_list
-filtered_df.loc['category_name'] = case_category_name_list
-filtered_df.loc['new_category_name'] = case_new_category_name_list
+filtered_df.loc[:, 'category_reasoning'] = case_classification_reasoning_list
+filtered_df.loc[:, 'category_name'] = case_category_name_list
+filtered_df.loc[:, 'new_category_name'] = case_new_category_name_list
 
 filtered_df.to_excel('top_level_classify.xlsx')
+
+print(filtered_df["category_name"].value_counts())
+print(filtered_df["new_category_name"].value_counts())
 
 # print(len(case_summary_list))
 
