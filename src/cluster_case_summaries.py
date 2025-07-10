@@ -22,6 +22,7 @@ from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
 
 from sentence_transformers import SentenceTransformer
 
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,17 +42,17 @@ def make_ollama_request(prompt):
     model_response = response.json()['response']
     return model_response
 
-def make_openrouter_request(prompt):
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        # pass api_key here or set it in env
-    )
-
-    resp = client.chat.completions.create(
-        model="meta-llama/llama-4-maverick",
+openrouter_client = OpenAI(
+    # base_url="https://openrouter.ai/api/v1",
+    # api_key=os.getenv('OPENROUTER_API_KEY')
+)
+def make_openrouter_request(prompt):    
+    resp = openrouter_client.chat.completions.create(
+        # model="meta-llama/llama-4-maverick",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=4000,
+        # temperature=0.3,
+        # max_tokens=4000,
     )
 
     repsonse_text = resp.choices[0].message.content
@@ -308,7 +309,7 @@ def cluster_case_summaries(case_summary_df):
     case_summary_embeddings = embed_case_summaries(case_summary_df)
 
     # Perform clustering
-    clusterer = sklearn.cluster.KMeans(n_clusters=30)
+    clusterer = sklearn.cluster.KMeans(n_clusters=3)
     # clusterer = sklearn.cluster.HDBSCAN(min_cluster_size=50)
     cluster_predictions = clusterer.fit_predict(case_summary_embeddings)
 
@@ -326,7 +327,7 @@ def extract_cluster_topics(case_cluster_df):
     num_example_cases_per_cluster = 25
     for cluster_id, cluster_df in case_cluster_df_groupby:
         # get some example case summaries belonging to this cluster
-        sampled_cluster_df = cluster_df.sample(num_example_cases_per_cluster)
+        sampled_cluster_df = cluster_df.sample(min(num_example_cases_per_cluster, len(cluster_df)))
         example_case_summary_list = sampled_cluster_df['case_summary'].tolist()
         example_cluster_cases_str = case_divider.join(example_case_summary_list)
 
@@ -369,10 +370,10 @@ def deduplicate_clusters(cluster_topic_df):
     case_divider = f"\n{separator_line}\n\n"
     for cluster_id, cluster_df in cluster_topic_df_groupby:
 
-        cluster_topic = cluster_df['cluster_topic'][0]
+        cluster_topic = cluster_df['cluster_topic'].iloc[0]
         
         # get a few exmple summary
-        sampled_cluster_df = cluster_df.sample(num_example_cases_per_cluster)
+        sampled_cluster_df = cluster_df.sample(min(num_example_cases_per_cluster, len(cluster_df)))
         example_case_summary_list = sampled_cluster_df['case_summary'].tolist()
         example_cluster_cases_str = case_divider.join(example_case_summary_list)
 
@@ -382,7 +383,8 @@ def deduplicate_clusters(cluster_topic_df):
     
 
     # dedpulicate similar clusters
-    adaptor = PydanticAdaptorOpenRouter()
+    openai_client = OpenAI()
+    adaptor = PydanticAdaptorOpenRouter(openai_client=openai_client)
     cluster_id_groupings_list = []
     while len(cluster_info_list) > 0:
         query_cluster_id, query_cluster_info = cluster_info_list[0]
@@ -402,7 +404,7 @@ def deduplicate_clusters(cluster_topic_df):
                 merge_cluster_analysis = adaptor.chat.completions.create(
                     pydantic_model=MergeClusterAnalysis,
                     num_retries=5,
-                    model="openai/gpt-4o-mini",
+                    model="gpt-4o-mini",
                     messages=message_history,
                     max_tokens=4096,
                     stream=False
@@ -428,7 +430,7 @@ def deduplicate_clusters(cluster_topic_df):
 
 if __name__ == "__main__":
     # ROSS
-    path = "/Users/suryakrishnan/Documents/GitHub/aptean/ROSS_case_list.xlsx"
+    path = "/workspace/aptean/ROSS_case_list.xlsx"
 
     df = pd.read_excel(path)
     filtered_df = df.iloc[:100]
