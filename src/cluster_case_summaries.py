@@ -275,6 +275,7 @@ def add_case_summary_df(df):
     # get all case summary
     case_summary_list = []
     row_idx_list = []
+    print('adding all case summary')
     with ThreadPoolExecutor(max_workers=42) as executor:
         case_summary_futures2idx = {executor.submit(get_case_summary, row): row_idx for row_idx, row in df.iterrows()}
         
@@ -295,6 +296,7 @@ def embed_case_summaries(case_summary_df):
     # embed all case summaries
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
     case_summary_embeddings = []
+    print("embedding all case summary")
     for case_summary in tqdm(case_summary_list):
         case_summary_embedding = embedder.encode([case_summary])[0]
         case_summary_embeddings.append(case_summary_embedding)
@@ -304,12 +306,12 @@ def embed_case_summaries(case_summary_df):
     return case_summary_embeddings
 
 
-def cluster_case_summaries(case_summary_df):
+def cluster_case_summaries(case_summary_df, n_clusters):
 
     case_summary_embeddings = embed_case_summaries(case_summary_df)
 
     # Perform clustering
-    clusterer = sklearn.cluster.KMeans(n_clusters=3)
+    clusterer = sklearn.cluster.KMeans(n_clusters=n_clusters)
     # clusterer = sklearn.cluster.HDBSCAN(min_cluster_size=50)
     cluster_predictions = clusterer.fit_predict(case_summary_embeddings)
 
@@ -386,6 +388,8 @@ def deduplicate_clusters(cluster_topic_df):
     openai_client = OpenAI()
     adaptor = PydanticAdaptorOpenRouter(openai_client=openai_client)
     cluster_id_groupings_list = []
+    print('starting deduplication')
+    print('initial custer number', len(cluster_info_list))
     while len(cluster_info_list) > 0:
         query_cluster_id, query_cluster_info = cluster_info_list[0]
         curr_cluster_id_grouping = [query_cluster_id]
@@ -417,6 +421,8 @@ def deduplicate_clusters(cluster_topic_df):
         cluster_info_list = [(cluster_id, cluster_info) for cluster_id, cluster_info in cluster_info_list if cluster_id not in curr_cluster_id_grouping]
         cluster_id_groupings_list.append(curr_cluster_id_grouping)
 
+        print('cluster number', len(cluster_info_list))
+
     
     cluster_topic_df["merged_cluster"] = None
     for curr_cluster_id_grouping in cluster_id_groupings_list:
@@ -437,7 +443,7 @@ if __name__ == "__main__":
 
     case_summary_df = add_case_summary_df(filtered_df)
 
-    case_cluster_df = cluster_case_summaries(case_summary_df)
+    case_cluster_df = cluster_case_summaries(case_summary_df, n_clusters=3)
 
     cluster_topics_df = extract_cluster_topics(case_cluster_df)
 
