@@ -13,7 +13,7 @@ path = "/workspace/aptean/ROSS_case_list.xlsx"
 base_debug_path = Path("/workspace/aptean/scratchpad_data")
 
 df = pd.read_excel(path)
-df = df.iloc[:100]
+# df = df.iloc[:100]
 
 
 # classify all clases (lv 1)
@@ -50,13 +50,13 @@ print('finished case summary addition',  time.time() - start)
 
 
 
-# Cluster based on case summary at (category, module) groupings
-cluster_df_list = []
-base_n_clusters = 10
-for cluster_group_col_list, cluster_df in case_summary_df.groupby(['deduplicated_module_name', 'category_name']):
-    print(cluster_group_col_list)
-    print(len(cluster_df))
-    print(f"\n\n{'-'*25}\n\n")
+# # Cluster based on case summary at (category, module) groupings
+# cluster_df_list = []
+# base_n_clusters = 10
+# for cluster_group_col_list, cluster_df in case_summary_df.groupby(['deduplicated_module_name', 'category_name']):
+#     print(cluster_group_col_list)
+#     print(len(cluster_df))
+#     print(f"\n\n{'-'*25}\n\n")
     
 #     n_clusters = min(base_n_clusters, len(cluster_df))
 #     case_cluster_df = cluster_case_summaries(cluster_df, n_clusters)
