@@ -50,35 +50,28 @@ print('finished case summary addition',  time.time() - start)
 
 
 
-# # Cluster based on case summary at (category, module) groupings
-# cluster_df_list = []
-# base_n_clusters = 10
-# for cluster_group_col_list, cluster_df in case_summary_df.groupby(['deduplicated_module_name', 'category_name']):
-#     print(cluster_group_col_list)
-#     print(len(cluster_df))
-#     print(f"\n\n{'-'*25}\n\n")
+# Cluster based on case summary at (category, module) groupings
+
+# UNCOMMENT THIS TO RUN THE FINAL PART OF THE PIPELINE ONCE YOU UNDERSTAND WHAT'S HAPPENING AND THE COST IMPLICATIONS
+
+#TODO YOU NEED TO REMOVE THE ILOC STATEMENT TO ACTUALLY RUN THIS FOR ALL THE CASES
+#TODO BUG IMPORTANT REMOVE THIS ONLY WHEN YOU EVENTUALLY FIND A MODEL THAT YOU ARE HAPPY WITH IN TERMS OF COST/PERFORMANCE
+case_summary_df = case_summary_df.iloc[:100]
+
+groupby_df_list = []
+with ThreadPoolExecutor(max_workers=42) as executor:
+    groupby_df_cluster_futures2col_list = {}
+    for cluster_group_col_list, groupby_df in case_summary_df.groupby(['deduplicated_module_name', 'category_name']):            
+        groupby_df_cluster_futures2col_list[executor.submit(add_case_cluster_info, groupby_df)] = cluster_group_col_list
     
-#     n_clusters = min(base_n_clusters, len(cluster_df))
-#     case_cluster_df = cluster_case_summaries(cluster_df, n_clusters)
-#     cluster_topics_df = extract_cluster_topics(case_cluster_df)
-#     deduplicated_cluster_df = deduplicate_clusters(cluster_topics_df)
+    for future in tqdm(as_completed(groupby_df_cluster_futures2col_list), total=len(groupby_df_cluster_futures2col_list)):
+        groupby_col_list = groupby_df_cluster_futures2col_list[future]
+        groupby_case_cluster_df = future.result()
+        
+        groupby_df_list.append(groupby_case_cluster_df)
 
-#     cluster_df_list.append(deduplicated_cluster_df)
 
-
-# src_cols_list = case_summary_df.columns
-# extra_cols_list = [col_name for col_name in cluster_df_list[0].columns if col_name not in src_cols_list]
-
-# for col_name in extra_cols_list:
-#     case_summary_df[col_name] = None
-
-# for cluster_df in cluster_df_list:
-#     cluster_df_index = cluster_df.index
-
-#     for col_name in extra_cols_list:
-#         case_summary_df.loc[cluster_df_index, col_name] = cluster_df[col_name]    
-
-# #DEBUG save file
-# deduplicated_cluster_df_path = base_debug_path.joinpath('deduplicated_cluster_df.xlsx')
-# case_cluster_df.to_excel(deduplicated_cluster_df_path)
-# print('finished clustering based on case summary')
+case_clustered_df = pd.concat(groupby_df_list)
+case_clustered_df_path = base_debug_path.joinpath('case_clustered.xlsx')
+case_clustered_df.to_excel(case_clustered_df_path)
+        
