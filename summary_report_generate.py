@@ -451,11 +451,10 @@ def clean_and_eval(x):
             return []  # or None if preferred
     return x
 
-def reprot_process(product_name, raw_data_file_path, output_file_path):
+def reprot_process(product_name, cases_df, output_file_path):
     
     input_data = dict()
-    cases_df = pd.read_excel(raw_data_file_path)
-
+    
     input_data['product_name'] = cases_df['Product Line'].dropna().unique()[0]
     input_data['unique_customers'] = cases_df['Account Name'].nunique()
     input_data['versions_analysed'] = ','.join(cases_df['Product Version Name'].dropna().unique().astype(str))
@@ -557,7 +556,7 @@ def reprot_process(product_name, raw_data_file_path, output_file_path):
     
     # Mapping of analysis_df columns to contributor labels
     contributor_category = analysis_df['Insight Category'].unique().tolist()
-    contributor_category = [c for c in contributor_category if c != "Other"]
+    contributor_category = [c for c in contributor_category if pd.notna(c) and str(c).strip() and c != "Other"]
 
     # Build contributors list dynamically
     top_count=10

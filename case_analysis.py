@@ -3,6 +3,7 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 import json
+import traceback
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -298,7 +299,7 @@ def process_cluster(cluster_id, cluster_df):
             stream=False
         )
     except Exception as e:
-        print(e)
+        print(f"process_cluster - adaptor call - {e}")
 
     if case_classification:
         case_classification_dict = case_classification.model_dump()
@@ -306,79 +307,102 @@ def process_cluster(cluster_id, cluster_df):
     case_classification_dict['case_numbers'] = case_numbers
     case_classification_dict['case_count'] = len(case_numbers)
 
-    # Convert datetime columns
-    datetime_format = "%m/%d/%Y %I:%M %p"
-    cluster_df['datetime_opened'] = pd.to_datetime(cluster_df['datetime_opened'], format=datetime_format, errors='coerce')
-    cluster_df['datetime_closed'] = pd.to_datetime(cluster_df['datetime_closed'], format=datetime_format, errors='coerce')
+    try:
+        # Convert datetime columns
+        datetime_format = "%m/%d/%Y %I:%M %p"
+        cluster_df['datetime_opened'] = pd.to_datetime(cluster_df['datetime_opened'], format=datetime_format, errors='coerce')
+        cluster_df['datetime_closed'] = pd.to_datetime(cluster_df['datetime_closed'], format=datetime_format, errors='coerce')
 
-    # Compute resolution days
-    cluster_df['resolution_days'] = (cluster_df['datetime_closed'] - cluster_df['datetime_opened']).dt.total_seconds() / 86400
+        # Compute resolution days
+        cluster_df['resolution_days'] = (cluster_df['datetime_closed'] - cluster_df['datetime_opened']).dt.total_seconds() / 86400
 
-    # Resolution days stats
-    if 'resolution_days' in cluster_df.columns:
-        if not cluster_df['resolution_days'].isna().all():
-            resolution_days_mean   = round(cluster_df['resolution_days'].mean(), 2)
-            resolution_days_median = round(cluster_df['resolution_days'].median(), 2)
-            resolution_days_95p    = round(np.percentile(cluster_df['resolution_days'].dropna(), 95), 2)
+        # Resolution days stats
+        if 'resolution_days' in cluster_df.columns:
+            if not cluster_df['resolution_days'].isna().all():
+                resolution_days_mean   = round(cluster_df['resolution_days'].mean(), 2)
+                resolution_days_median = round(cluster_df['resolution_days'].median(), 2)
+                resolution_days_95p    = round(np.percentile(cluster_df['resolution_days'].dropna(), 95), 2)
+            else:
+                resolution_days_mean = resolution_days_median = resolution_days_95p = "N/A"
         else:
             resolution_days_mean = resolution_days_median = resolution_days_95p = "N/A"
-    else:
-        resolution_days_mean = resolution_days_median = resolution_days_95p = "N/A"
 
-    # Satisfaction score stats (corrected column name spelling if needed)
-    satisfaction_col = 'overall_satisfaction' if 'overall_satisfaction' in cluster_df.columns else 'overall_atisfaction'
-    if satisfaction_col in cluster_df.columns:
-        if not cluster_df[satisfaction_col].isna().all():
-            sat_score_mean   = round(cluster_df[satisfaction_col].mean(), 2)
-            sat_score_median = round(cluster_df[satisfaction_col].median(), 2)
-            sat_score_25p    = round(np.percentile(cluster_df[satisfaction_col].dropna(), 25), 2)
-            sat_score_95p    = round(np.percentile(cluster_df[satisfaction_col].dropna(), 95), 2)
+        # Satisfaction score stats (corrected column name spelling if needed)
+        satisfaction_col = 'overall_satisfaction' if 'overall_satisfaction' in cluster_df.columns else 'overall_atisfaction'
+        if satisfaction_col in cluster_df.columns:
+            if not cluster_df[satisfaction_col].isna().all():
+                sat_score_mean   = round(cluster_df[satisfaction_col].mean(), 2)
+                sat_score_median = round(cluster_df[satisfaction_col].median(), 2)
+                sat_score_25p    = round(np.percentile(cluster_df[satisfaction_col].dropna(), 25), 2)
+                sat_score_95p    = round(np.percentile(cluster_df[satisfaction_col].dropna(), 95), 2)
+            else:
+                sat_score_mean = sat_score_median = sat_score_25p = sat_score_95p = "N/A"
         else:
             sat_score_mean = sat_score_median = sat_score_25p = sat_score_95p = "N/A"
-    else:
-        sat_score_mean = sat_score_median = sat_score_25p = sat_score_95p = "N/A"
 
-    # Customer distribution
-    if "account_name" in cluster_df.columns:
-        cust_counts = cluster_df["account_name"].dropna().value_counts()
-        customer_dist_str = "; ".join(f"{name}:{count}" for name, count in cust_counts.items())
-        top5 = cust_counts.head(5)
-        top5_str = "; ".join(f"{name}:{count}" for name, count in top5.items())
-    else:
-        customer_dist_str = "N/A"
-        top5_str = "N/A"
+        # Customer distribution
+        if "account_name" in cluster_df.columns:
+            cust_counts = cluster_df["account_name"].dropna().value_counts()
+            customer_dist_str = "; ".join(f"{name}:{count}" for name, count in cust_counts.items())
+            top5 = cust_counts.head(5)
+            top5_str = "; ".join(f"{name}:{count}" for name, count in top5.items())
+        else:
+            customer_dist_str = "N/A"
+            top5_str = "N/A"
 
-    # Case severity distribution
-    if "case_severity" in cluster_df.columns:
-        sev_counts = cluster_df["case_severity"].dropna().value_counts()
-        severity_dist_str = "; ".join([f"{sev}:{n}" for sev, n in sev_counts.items()])
-    else:
-        severity_dist_str = "N/A"
+        # Case severity distribution
+        if "case_severity" in cluster_df.columns:
+            sev_counts = cluster_df["case_severity"].dropna().value_counts()
+            severity_dist_str = "; ".join([f"{sev}:{n}" for sev, n in sev_counts.items()])
+        else:
+            severity_dist_str = "N/A"
 
-    # Production Version
-    versions = cluster_df['product_version_name'].dropna().unique().tolist() \
-               if 'product_version_name' in cluster_df.columns else []
+        # Production Version
+        versions = (
+            cluster_df['product_version_name'].dropna().astype(str).unique().tolist()
+            if 'product_version_name' in cluster_df.columns
+            else []
+        )
 
-    # Final dictionary update
-    case_classification_dict['product_version_name'] = ', '.join(versions) or "N/A"
-    case_classification_dict['avg_resolution_days'] = resolution_days_mean
-    case_classification_dict['median_resolution_days'] = resolution_days_median
-    case_classification_dict['p95_resolution_days'] = resolution_days_95p
-    case_classification_dict['avg_satisfaction_score'] = sat_score_mean
-    case_classification_dict['median_satisfaction_score'] = sat_score_median
-    case_classification_dict['p25_satisfaction_score'] = sat_score_25p
-    case_classification_dict['p95_satisfaction_score'] = sat_score_95p
-    case_classification_dict['ticket_distribution'] = customer_dist_str or "N/A"
-    case_classification_dict['top_5_customers'] = top5_str or "N/A"
-    case_classification_dict['case_severity_distribution'] = severity_dist_str or "N/A"
-    return cluster_id, case_classification_dict
+        # Final dictionary update
+        case_classification_dict['product_version_name'] = ', '.join(versions) or "N/A"
+        case_classification_dict['avg_resolution_days'] = resolution_days_mean
+        case_classification_dict['median_resolution_days'] = resolution_days_median
+        case_classification_dict['p95_resolution_days'] = resolution_days_95p
+        case_classification_dict['avg_satisfaction_score'] = sat_score_mean
+        case_classification_dict['median_satisfaction_score'] = sat_score_median
+        case_classification_dict['p25_satisfaction_score'] = sat_score_25p
+        case_classification_dict['p95_satisfaction_score'] = sat_score_95p
+        case_classification_dict['ticket_distribution'] = customer_dist_str or "N/A"
+        case_classification_dict['top_5_customers'] = top5_str or "N/A"
+        case_classification_dict['case_severity_distribution'] = severity_dist_str or "N/A"
+        return cluster_id, case_classification_dict
+    except Exception as e:
+        print(f"process_cluster - calc - {e}")
+        traceback.print_exc()
+        return cluster_id, dict()
 
 def analysis_process(file_name):
     try:
         file_path = '/home/ec2-user/kathiravan'
         input_file_name = f"{file_path}/input/{file_name}"
         
+        # Read Input file
         df = pd.read_excel(input_file_name)
+        
+        #Filter first 100 count
+        #df = df[0:500]
+
+        # Closed case only
+        df = df[df['Status'] == 'Closed']
+
+        # Condition for sub product
+        #df = df[df['Customer Asset'].str.contains('Integrated Fleets Paragon', case=False, na=False)]
+
+        df_copy = df.copy()
+
+        print(f"Size - {len(df)}")
+
         df.columns = (
             df.columns
             .str.strip()
@@ -387,12 +411,6 @@ def analysis_process(file_name):
             .str.replace('/', '')
             .str.replace(':', '')
         )
-
-        # Filter first 100 count
-        #df = df[0:500]
-
-        # Closed case only
-        df = df[df['status'] == 'Closed']
 
         df['case_info'] = df.apply(get_case_info, axis=1)
         case_cluster_df = cluster_case(df)
@@ -412,7 +430,8 @@ def analysis_process(file_name):
 
             for future in as_completed(futures):
                 cluster_id, result = future.result()
-                cluster_case_classification_analysis[cluster_id] = result
+                if result:
+                    cluster_case_classification_analysis[cluster_id] = result
 
         for cluster_id, case_dict in cluster_case_classification_analysis.items():
             case_dict["kb_article_number"] = ""
@@ -436,7 +455,6 @@ def analysis_process(file_name):
                 kb_article = None
                 if not filtered_df.empty:
                     result_list = filtered_df.to_dict(orient='records')
-                    print(f"//{result_list}")
                     kb_article = kb_analysis(case_dict, result_list)
                 else:
                     kb_article = kb_analysis(case_dict)
@@ -492,9 +510,10 @@ def analysis_process(file_name):
             detailed_output_df.to_excel(writer, index=False, sheet_name="Detailed Output")
             
             insight_categories = result_df['insight_category'].unique().tolist()
+            insight_categories = [c for c in insight_categories if pd.notna(c) and str(c).strip() and c != "Other"]
+
             for insight_category in  insight_categories:
                 if insight_category == "Knowledge Base Candidate":
-                    
                     # KB Candidate Summary
                     kb_df = result_df[result_df['insight_category'] == 'Knowledge Base Candidate'].copy()
                     kb_filtered_df = kb_df[
@@ -527,8 +546,7 @@ def analysis_process(file_name):
 
                     kb_filtered_df.to_excel(writer, index=False, sheet_name="Knowledge Base Candidate")
 
-                elif insight_category != "Other":
-
+                else:
                     category_df = result_df[result_df['insight_category'] == insight_category].copy()
                     category_df = category_df[
                             [
@@ -557,33 +575,21 @@ def analysis_process(file_name):
 
                     category_df.to_excel(writer, index=False, sheet_name=insight_category)
 
-        reprot_process(product_name, input_file_name, output_file_name)
+        reprot_process(product_name, df_copy, output_file_name)
  
         print("-- Completed --")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"analysis_process - error: {e}")
     
 if __name__ == "__main__":
 
-    #file_name = "Produce Pro ERP_case_list.xlsx"
-    #analysis_process(file_name)
-
-    # reprot_process('Produce Pro ERP', '/home/ec2-user/kathiravan/input/Produce Pro ERP_case_list.xlsx',
-    #     '/home/ec2-user/kathiravan/output/Produce Pro ERP_AI Analysis.xlsx')
-
     erp_names = [
-        'Apprise',
-        'Swords',
-        'Intuitive',
-        'Logis ERP',
         'Impress',
-        'Made2Manage',
-        'Ross',
-        'Produce Pro ERP',
-        'RLM ERP',
-        'Full Circle ERP',
-        'WorkWise ERP',
-        'JustFood',
+        #'WorkWise ERP',
+        #"Gould Hall"
+        #'Traverse Global'
+        #'ProcessPro',
+        #'Paragon'
     ]
 
     for erp_name in erp_names:
