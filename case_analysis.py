@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from sentence_transformers import SentenceTransformer
 from typing import  Literal
 from pydantic import BaseModel, Field
-from sklearn.cluster import HDBSCAN 
+from hdbscan import HDBSCAN 
 
 from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
 from knowledgebase_analysis import kb_analysis 
