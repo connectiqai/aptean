@@ -1,37 +1,39 @@
 import os
-import pandas as pd
-from tqdm import tqdm
-import numpy as np
-import json
+import re
 import traceback
-
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from sentence_transformers import SentenceTransformer
-from typing import  Literal
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from typing import Literal, List
 from pydantic import BaseModel, Field
-from hdbscan import HDBSCAN 
+from sentence_transformers import SentenceTransformer
+from hdbscan import HDBSCAN
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import normalize
 
 from PydanticAdaptorOpenRouter import PydanticAdaptorOpenRouter
-from knowledgebase_analysis import kb_analysis 
-from summary_report_generate import reprot_process
+from knowledgebase_analysis import kb_analysis
+from summary_report_generate import report_process
 
 tag_info = """Here is some context on the different pieces of information you may be given
 access to as part of analysing the case. Each of the below menitoned tags may or may not be
 present for each case
 
 <TAG INFO>
-1. DESCRIPTION - This represents the description of the case and some notes around it, written by the internal support team while discussing the case amongst themselves as they work to resolve it. These notes are typically internal-facing and may contain technical jargon or references to known issues or configurations.
-2. POSTS - This represents ad-hoc, often unstructured information present in internal logs, chat notes, or tracking documents as the support team investigates the issue. These entries may contain useful insights, but also a fair amount of noise, such as meeting schedules, team coordination details, or status updates that are not directly relevant to the technical root cause.
-3. EMAILS - This section contains the chronological conversation between the **support agent(s)** and the **customer**. It reflects the full communication trail starting from the customer's first report of the issue through to resolution or closure.
+1. SUBJECT - This is the initial title or summary provided by the **customer** when raising the case. It usually offers a brief indication of the reported issue and helps establish the **high-level context** of the case.
+2. DESCRIPTION - This represents the description of the case and some notes around it, written by the internal support team while discussing the case amongst themselves as they work to resolve it. These notes are typically internal-facing and may contain technical jargon or references to known issues or configurations.
+3. POSTS - This represents ad-hoc, often unstructured information present in internal logs, chat notes, or tracking documents as the support team investigates the issue. These entries may contain useful insights, but also a fair amount of noise, such as meeting schedules, team coordination details, or status updates that are not directly relevant to the technical root cause.
+4. EMAILS - This section contains the chronological conversation between the **support agent(s)** and the **customer**. It reflects the full communication trail starting from the customer's first report of the issue through to resolution or closure.
    These communications are often informal, and may include misspellings, mixed technical and non-technical language, and emotional tone (e.g., customer frustration or urgency). They are invaluable for understanding the **true impact of the issue**, the **steps taken**, and **what actually resolved it**.
-</TAG INFO></TAG INFO>
+</TAG INFO>
 """
 
 case_prompt_template = """You are a support analyst at Aptean reviewing a subset of technical support cases that have been grouped together 
 due to their similar issue patterns and underlying themes. Your task is to analyze the commonalities across these cases and propose a clear, 
 descriptive topic that accurately summarizes the core problem or theme represented by this cluster. Provide a detailed explanation of why this 
-topic best represents the pattern observed in these cases.
+topic best represents the pattern observed in these cases. Do not assume anything and your analysis should be purley on the basis of the data provided.
 
 Here is some information regarding the categories available to you
 <CATEGORIES INFO>
@@ -52,15 +54,6 @@ Use the following guidelines based on the category assigned:
 - If the category is `Software Bug`:  
   *Describe in detail what bug needs to be fixed, and if it's clear how, mention that as well.*  
   Identify where the faulty behavior occurs, what is causing it, and what the expected behavior is. If known, provide insight into the specific logic, condition, or module that needs to be corrected.
-
-- If the category is `Knowledge Base Candidate`:  
-  *Describe in detail what the knowledgebase article should cover.*  
-  Include:
-  - A clear and relevant title
-  - A concise problem description
-  - A step-by-step resolution or workaround
-  - Optional: preconditions, UI paths, screenshots, or configuration notes  
-  The article should help customers self-resolve the issue and reduce ticket volume.
 
 - If the category is `Admin Issue`:  
   *Describe in detail what administrative task needs to be automated, and how it can be automated efficiently.*  
@@ -133,11 +126,6 @@ categories_info = """
     - Educational Issue: If an issue is directly not related to any issues, process gaps in support process or cannot be addressed by a simple knowledge base article, 
     and a tutorial that is properly educational could be better suited for the given issue or situation, then classify it as an educational issue.
 
-    - Knowledge Base Candidate: If an issue is related to Repeated questions by user, How-to queries, Troubleshooting steps that were recommended to them, 
-    any gaps found in existing Knowledge Base Articles or documentation, or Resolution steps that could be reused then classify as a KB Candidate. 
-    It should not be related to any integration issue, data corruption issue, feature enhancement, any module specific issue, setup issue or 
-    any other technical issue and should really be related to knowledge base article.
-
     - Other: If an issue does not follow in any of these categories. Classify it as other. When you classify an issue
     as other. Provide a name for a category that should be created that will represent the class of issues represented
     by this current issue. Only do this if the issue cannot be clearly placed in any of the above mentioned categories.
@@ -148,13 +136,13 @@ categories_info = """
 adaptor = PydanticAdaptorOpenRouter(openai_client=None, openai_api_key=os.getenv('OPENROUTER_API_KEY'))
 
 class CaseClassification(BaseModel):
-    LV1: str = Field(..., description="Broad functional area such as Access, Reporting, Integration, Admin, Very high level modules etc. There should not be duplicates within this group and should not be duplicates across  LV2 and LV3 groups.")
-
-    LV2: str = Field(..., description="Specific product modules, workflow, or component within the product. There should not be duplicates within this group and should not be duplicates across  LV1 and LV3 groups.")
+    LV1: str = Field(..., description="Broad functional area such as Access, Reporting, Integration, Admin, Very high level modules etc. There should not be duplicates or similar sounding group names within this group and should not be duplicates or similar sounding names across  LV2 and LV3 groups.")
  
-    LV3: str = Field(..., description="Concrete technical symptoms or failure pattern (e.g., 'Login screen hangs', 'Incorrect totals in report', 'Specific Login Failures', 'Specific Product modules', 'Specific Data Discrepancies', 'Specific Setup issues', 'Specific Errors',  ). There should not be duplicates within this group and should not be duplicates across  LV1 and LV2 groups.")
-    
-    insight_category: Literal['Integration', 'Software Bug', 'Feature Enhancement', 'Module Issue', 'Admin Issue', 'Data Error', 'Setup Issue', 'Process Gap', 'Educational Issue', 'Knowledge Base Candidate', 'Other'] = Field(
+    LV2: str = Field(..., description="Specific product modules, workflow, or component within the product that would typically come under their parent LV1 category. There should not be duplicates or similar sounding names within this group and should not be duplicates similar sounding names across  LV1 and LV3 groups. Note that LV2 will have their respective LV3 children")
+ 
+    LV3: str = Field(..., description="Concrete technical symptoms or failure pattern (e.g., 'Login screen hangs', 'Incorrect totals in report', 'Specific Login Failures', 'Specific Product modules', 'Specific Data Discrepancies', 'Specific Setup issues', 'Specific Errors',  ). There should not be duplicates or similar sounding names within this group and should not be duplicates or similar sounding names across  LV1 and LV2 groups. If you come across suplicates or similar sounding names then try to be more specific in naming them so that users can identify the differences through the name. Note that LV3 names are the most granular leaf level categories that have their respective LV2 parents")
+
+    insight_category: Literal['Integration', 'Software Bug', 'Feature Enhancement', 'Module Issue', 'Admin Issue', 'Data Error', 'Setup Issue', 'Process Gap', 'Educational Issue', 'Other'] = Field(
         ..., 
         description="Your task is to categorize this issue according to the categories provided to you. Only select one category per case and be extremely thoughtful and analytical in your decision."
     )
@@ -171,233 +159,299 @@ class CaseClassification(BaseModel):
 
     case_root_cause: str = Field(
         ..., 
-        description="Clearly explain the root cause of the issue across the analyzed cases. Your explanation should be aligned with one of the following categories: Integration, Software Bug, Feature Enhancement, Module Issue, Admin Issue, Data Error, Setup Issue, Process Gap, Educational Issue, Knowledge Base Candidate, or Other. Be specific about what failed technically or procedurally."
+        description="Clearly explain the root cause of the issue across the analyzed cases. Your explanation should be aligned with one of the following categories: Integration, Software Bug, Feature Enhancement, Module Issue, Admin Issue, Data Error, Setup Issue, Process Gap, Educational Issue or Other. Be specific about what failed technically or procedurally."
     )
     case_recommendation: str = Field(
         ..., 
         description="Based on the root cause and the insight category, provide very detailed actionable recommendations as to what exactly should be done to address all such issues. These may include one of the following- fixing a software bug, proposing a feature change or enhancement, fixing a specific data issue, addressing an integration issue,  preventing a potential configuration or setup issue , closing a process gap, automating a task, adding Knowledgebase content, or initiating training. Your recommendation should succinct and should clearly correspond to the category."
     )
 
-# def embed_case(case_df):
-#     case_list = case_df['case_info'].tolist()
+    kb_candidate: Literal['Y', 'N'] = Field(
+        ...,
+        description=(
+        "Determine if the cases could be addressed by a Knowledgebase (KB) article with absolute certainty that can enable users to self serve so they could address such issues themselves without taking support professionals help."
+        "You must assign one of the two values:"
+        "kb_candidate: Literal['Y', 'N']"
+        "Following are the criteria- Section 'A' for 'Y' and Section 'B' for 'N' "
 
-#     #embed all case summaries
-#     embedder = SentenceTransformer("all-MiniLM-L6-v2")
-#     case_embeddings = []
-#     for case in tqdm(case_list):
-#         case_embedding = embedder.encode([case])[0]
-#         case_embeddings.append(case_embedding)
+        "A. Mark 'Y' only if ALL of the following 'A.1', 'A.2', 'A.3', 'A.4' are true:"
+        "A.1. The issue occurred across multiple customers — not a one-off or unique to a specific environment."
+        "A.2. The root cause and resolution are generalizable — not tied to customer-specific configurations, data, or scripts."
+        "A.3. The fix or workaround is clear, repeatable, and can be executed by support staff or end users (e.g., configuration steps, usage clarification)."
+        "A.4. The solution can be safely documented and reused in future similar cases."
 
-#     case_embeddings = np.array(case_embeddings)
+        "B. Otherwise, mark 'N' if ANY of the following are true:"
+        "B.1. The issue is unique to a single customer, environment, or custom setup."
+        "B.2. It requires engineering intervention such as a code fix, patch, or product enhancement."
+        "B.3. It involves third-party dependencies, sensitive backend changes, or one-off data cleanup."
+        "B.4. The workaround is complex, not clearly actionable, or not reusable across other cases."
+        "B.5. The case is related to a **feature enhancement**, a **software or code bug/fix**, or a **data error** that requires backend correction and cannot be addressed through documentation alone."
+        "Be conservative: only mark 'Y' when the issue is recurring, self-resolvable, and the resolution is well-suited for documentation."
+    )
+)
 
-#     return case_embeddings
+class CategoryGroup(BaseModel):
+    category_name: str = Field(..., description="The name of the inferred high-level category.")
+    cluster_ids: List[int] = Field(..., description="List of unique cluster IDs belonging to this category.")
 
-# def cluster_case(case_df):
-#     case_embeddings = embed_case(case_df)
-#     clusterer = HDBSCAN(min_cluster_size=2)
-#     cluster_predictions = clusterer.fit_predict(case_embeddings)
-#     case_df['cluster'] = cluster_predictions
-#     return case_df
+class ClusterGroupingResponse(BaseModel):
+    groups: List[CategoryGroup]
+
+remove_duplicate_category = """
+You are a support case analyst.
+You will be provided a list of cluster items, each with a cluster_id and a category (description of the issue).
+
+Your task:
+- ONLY consider user management-related categories
+- IGNORE any items that are not related to user management, such as invoicing, shipping, integration, data error, configuration issues, etc).
+- Group the relevant user management items into the following two categories:
+
+1. **User Account Creation**
+   - Includes: new user creation, user setup, user onboarding, user account setup, account creation in Aptean connect, User Accounts setup management, User Account creation requests, User Account setup issues, etc.
+2. **User Access and Credentials**
+   - Includes: login failures, session lockouts, password resets issues, password reset requests, credential issues, authentication problems, permission changes, deactivation, role assignment, granting and revoking permissions, permissions setup, modifying user roles, inconsistent user roles or permissions, passwords expire, permissions management, modifying user roles etc.
+   
+Return a valid JSON object **strictly** in this format:
+{{
+    "User Account Creation": [<Input Category Topics>],
+    "User Access and Credentials": [<Input Category Topics>]
+}}
+ 
+Do not include explanations — only the valid JSON output.
+ 
+Input:
+{cluster_data}
+"""
+
+def clean_control_chars(text):
+    return re.sub(r'[\x00-\x1F\x7F]', '', text or '')
+
+def categor_format_input_data(data):
+    return "\n".join([f"{cid}: {desc}" for cid, desc in data])
 
 def embed_case(case_df):
-    case_list = case_df['case_info'].tolist()
+    case_list = case_df['combined_case_input'].tolist()
+    
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
-    case_embeddings = [embedder.encode([case])[0] for case in tqdm(case_list)]
-    return np.array(case_embeddings)
 
-def cluster_case(case_df, initial_min_cluster_size=2, max_cluster_size=100):
+    # Embed all case summaries
+    case_embeddings = []
+    for case in tqdm(case_list, desc="Embedding cases"):
+        embedding = embedder.encode([case])[0]
+        case_embeddings.append(embedding)
+
+    case_embeddings = np.array(case_embeddings, dtype=np.float32)
+
+    # Normalize embeddings (L2 normalization)
+    normalized_embeddings = normalize(case_embeddings)
+
+    return normalized_embeddings
+
+def cluster_case(case_df):
+    """
+    Clusters embedded case descriptions using KMeans and appends cluster IDs to the DataFrame.
+    """
+    size = len(case_df)
+
+    if size <= 5000:
+        n_clusters = 150
+    elif size <= 10000:
+        n_clusters = 300
+    elif size <= 15000:
+        n_clusters = 400
+    else:
+        n_clusters = 500
+
     case_embeddings = embed_case(case_df)
 
-    # Initial clustering
-    clusterer = HDBSCAN(min_cluster_size=initial_min_cluster_size)
+    clusterer = KMeans(
+        n_clusters=n_clusters,
+        init='k-means++',
+        random_state=42,
+        n_init='auto'
+    )
+
     cluster_predictions = clusterer.fit_predict(case_embeddings)
     case_df['cluster'] = cluster_predictions
 
-    new_clusters = []
-    cluster_offset = 0  # for re-assigning cluster numbers without overlap
-
-    for cluster_id in sorted(case_df['cluster'].unique()):
-        if cluster_id == -1:
-            # Noise points: keep as is
-            noise_df = case_df[case_df['cluster'] == -1].copy()
-            noise_df['cluster'] = -1
-            new_clusters.append(noise_df)
-            continue
-
-        cluster_group = case_df[case_df['cluster'] == cluster_id].copy()
-        if len(cluster_group) <= max_cluster_size:
-            # Cluster is small enough, keep as is
-            cluster_group['cluster'] = cluster_id + cluster_offset
-            new_clusters.append(cluster_group)
-        else:
-            # Re-cluster this group
-            print(f"Re-clustering cluster {cluster_id} with {len(cluster_group)} points...")
-            sub_embeddings = embed_case(cluster_group)
-            sub_clusterer = HDBSCAN(min_cluster_size=initial_min_cluster_size)
-            sub_preds = sub_clusterer.fit_predict(sub_embeddings)
-
-            # Offset sub-cluster labels
-            sub_cluster_ids = set(sub_preds)
-            for sub_id in sub_cluster_ids:
-                sub_cluster = cluster_group[sub_preds == sub_id].copy()
-                if sub_id == -1:
-                    sub_cluster['cluster'] = -1
-                else:
-                    sub_cluster['cluster'] = cluster_offset
-                    cluster_offset += 1
-                new_clusters.append(sub_cluster)
-
-    result_df = pd.concat(new_clusters, ignore_index=True)
-    return result_df
+    return case_df
 
 def get_case_info(row):
     case_info_str = ""
+    col_name_tag_list = [
+        ('subject', 'SUBJECT'),
+        ('description', 'DESCRIPTION'),
+        ('posts', 'POSTS'),
+        ('emails', 'EMAILS')
+    ]
 
-    col_name_tag_list = [('subject', 'DESCRIPTION'), ('posts', 'POSTS'), ('emails', 'EMAILS')]
-    for (col_name, col_tag) in col_name_tag_list:
-        val = row.loc[col_name]
-        if not pd.isna(val):
+    for col_name, col_tag in col_name_tag_list:
+        val = row.get(col_name)
+        if pd.notna(val):
             case_info_str += f"<{col_tag}>\n{val}\n</{col_tag}>\n\n"
 
     return case_info_str
 
 def process_cluster(cluster_id, cluster_df):
-    print(f"Processing started - {cluster_id}")
-
+    # Prepare example case string
     separator_line = "-" * 25
     case_divider = f"\n{separator_line}\n\n"
-    num_example_cases_per_cluster = 25
+    num_examples = min(25, len(cluster_df))
 
-    sampled_cluster_df = cluster_df.sample(min(num_example_cases_per_cluster, len(cluster_df)))
-    example_case_list = sampled_cluster_df['case_info'].tolist()
+    sampled_df = cluster_df.sample(num_examples)
+    example_case_list = sampled_df['case_info'].tolist()
     case_numbers = cluster_df['case_number'].tolist()
     example_cluster_cases_str = case_divider.join(example_case_list)
 
+    # Format classification prompt
     case_classification_prompt = case_prompt_template.format(
         categories_info=categories_info,
         tag_info=tag_info,
         case_info=example_cluster_cases_str
     )
 
-    content = [{"type": "text", "text": case_classification_prompt}]
-    curr_message = {
+    message_history = [{
         "role": "user",
-        "content": content
-    }
+        "content": [{"type": "text", "text": case_classification_prompt}]
+    }]
 
-    message_history = [curr_message]
-    case_classification = None
-    case_classification_dict=dict()
-    
+    case_classification_dict = {}
     try:
         case_classification = adaptor.chat.completions.create(
             pydantic_model=CaseClassification,
-            num_retries=10,
+            num_retries=25,
             model="gpt-4o-mini",
             messages=message_history,
             max_tokens=4096,
             stream=False
         )
+
+        if case_classification:
+            case_classification_dict = case_classification.model_dump()
+            case_classification_dict['customer_query'] = clean_control_chars(case_classification_dict.get('customer_query',''))
+            case_classification_dict['case_summary'] = clean_control_chars(case_classification_dict.get('case_summary',''))
+            case_classification_dict['case_root_cause'] = clean_control_chars(case_classification_dict.get('case_root_cause',''))
+            case_classification_dict['custcase_recommendationomer_query'] = clean_control_chars(case_classification_dict.get('case_recommendation',''))
+
+            case_classification_dict['case_numbers'] = case_numbers
+            case_classification_dict['case_count'] = len(case_numbers)
+            case_classification_dict['cluster_cases_str'] = example_cluster_cases_str
+
     except Exception as e:
-        print(f"process_cluster - adaptor call - {e}")
+        print(f"process_cluster - adaptor call failed: {e}")
+        traceback.print_exc()
 
-    if case_classification:
-        case_classification_dict = case_classification.model_dump()
+    return cluster_id, case_classification_dict
 
-    case_classification_dict['case_numbers'] = case_numbers
-    case_classification_dict['case_count'] = len(case_numbers)
+def remove_duplicate_cluster(cluster_case_classification_analysis):
+    admin_issue_list = []
 
+    # Collect clusters labeled as 'Admin Issue'
+    for cluster_id, case_dict in cluster_case_classification_analysis.items():
+        if case_dict.get('insight_category') == 'Admin Issue':
+            admin_issue_list.append((cluster_id, case_dict.get('LV3', '')))
+
+    print("Total Admin Count - ", len(admin_issue_list))
+    
+    formatted_data = categor_format_input_data(admin_issue_list)
+    remove_duplicate_category_prompt = remove_duplicate_category.format(cluster_data=formatted_data)
+
+    print("remove_duplicate_category_prompt -", len(remove_duplicate_category_prompt))
+
+    message_history = [{
+        "role": "user",
+        "content": [{"type": "text", "text": remove_duplicate_category_prompt}]
+    }]
+
+    cluster_grouping_response = None
     try:
-        # Convert datetime columns
-        datetime_format = "%m/%d/%Y %I:%M %p"
-        cluster_df['datetime_opened'] = pd.to_datetime(cluster_df['datetime_opened'], format=datetime_format, errors='coerce')
-        cluster_df['datetime_closed'] = pd.to_datetime(cluster_df['datetime_closed'], format=datetime_format, errors='coerce')
+        cluster_grouping_response = adaptor.chat.completions.create(
+            pydantic_model=ClusterGroupingResponse,
+            num_retries=10,
+            model="gpt-4o",
+            messages=message_history,
+            max_tokens=4096,
+            stream=False
+        )
+    except Exception as e:
+        print(f"remove_duplicate_cluster - grouping adaptor call error: {e}")
+        traceback.print_exc()
 
-        # Compute resolution days
-        cluster_df['resolution_days'] = (cluster_df['datetime_closed'] - cluster_df['datetime_opened']).dt.total_seconds() / 86400
+    if not cluster_grouping_response:
+        return cluster_case_classification_analysis
 
-        # Resolution days stats
-        if 'resolution_days' in cluster_df.columns:
-            if not cluster_df['resolution_days'].isna().all():
-                resolution_days_mean   = round(cluster_df['resolution_days'].mean(), 2)
-                resolution_days_median = round(cluster_df['resolution_days'].median(), 2)
-                resolution_days_95p    = round(np.percentile(cluster_df['resolution_days'].dropna(), 95), 2)
-            else:
-                resolution_days_mean = resolution_days_median = resolution_days_95p = "N/A"
-        else:
-            resolution_days_mean = resolution_days_median = resolution_days_95p = "N/A"
+    category_groups = cluster_grouping_response.model_dump().get("groups", [])
+    print("category_groups-", category_groups)
 
-        # Satisfaction score stats (corrected column name spelling if needed)
-        satisfaction_col = 'overall_satisfaction' if 'overall_satisfaction' in cluster_df.columns else 'overall_atisfaction'
-        if satisfaction_col in cluster_df.columns:
-            if not cluster_df[satisfaction_col].isna().all():
-                sat_score_mean   = round(cluster_df[satisfaction_col].mean(), 2)
-                sat_score_median = round(cluster_df[satisfaction_col].median(), 2)
-                sat_score_25p    = round(np.percentile(cluster_df[satisfaction_col].dropna(), 25), 2)
-                sat_score_95p    = round(np.percentile(cluster_df[satisfaction_col].dropna(), 95), 2)
-            else:
-                sat_score_mean = sat_score_median = sat_score_25p = sat_score_95p = "N/A"
-        else:
-            sat_score_mean = sat_score_median = sat_score_25p = sat_score_95p = "N/A"
+    for category_group in category_groups:
+        cluster_ids = category_group.get("cluster_ids", [])
+        if not cluster_ids:
+            continue
 
-        # Customer distribution
-        if "account_name" in cluster_df.columns:
-            cust_counts = cluster_df["account_name"].dropna().value_counts()
-            customer_dist_str = "; ".join(f"{name}:{count}" for name, count in cust_counts.items())
-            top5 = cust_counts.head(5)
-            top5_str = "; ".join(f"{name}:{count}" for name, count in top5.items())
-        else:
-            customer_dist_str = "N/A"
-            top5_str = "N/A"
+        print("Removed cluster Ids size", len(cluster_ids))
+        cluster_cases_str = ""
+        cluster_case_numbers = []
+        selected_cluster_id = cluster_ids[0]
 
-        # Case severity distribution
-        if "case_severity" in cluster_df.columns:
-            sev_counts = cluster_df["case_severity"].dropna().value_counts()
-            severity_dist_str = "; ".join([f"{sev}:{n}" for sev, n in sev_counts.items()])
-        else:
-            severity_dist_str = "N/A"
+        for cluster_id in cluster_ids:
+            case_data = cluster_case_classification_analysis.pop(cluster_id, None)
+            if case_data:
+                new_str = case_data.get("cluster_cases_str", "")
+                if len(new_str) > len(cluster_cases_str):
+                    cluster_cases_str = new_str
+                    
+                cluster_case_numbers.extend(case_data.get("case_numbers", []))
 
-        # Production Version
-        versions = (
-            cluster_df['product_version_name'].dropna().astype(str).unique().tolist()
-            if 'product_version_name' in cluster_df.columns
-            else []
+        case_classification_prompt = case_prompt_template.format(
+            categories_info=categories_info,
+            tag_info=tag_info,
+            case_info=cluster_cases_str
         )
 
-        # Final dictionary update
-        case_classification_dict['product_version_name'] = ', '.join(versions) or "N/A"
-        case_classification_dict['avg_resolution_days'] = resolution_days_mean
-        case_classification_dict['median_resolution_days'] = resolution_days_median
-        case_classification_dict['p95_resolution_days'] = resolution_days_95p
-        case_classification_dict['avg_satisfaction_score'] = sat_score_mean
-        case_classification_dict['median_satisfaction_score'] = sat_score_median
-        case_classification_dict['p25_satisfaction_score'] = sat_score_25p
-        case_classification_dict['p95_satisfaction_score'] = sat_score_95p
-        case_classification_dict['ticket_distribution'] = customer_dist_str or "N/A"
-        case_classification_dict['top_5_customers'] = top5_str or "N/A"
-        case_classification_dict['case_severity_distribution'] = severity_dist_str or "N/A"
-        return cluster_id, case_classification_dict
-    except Exception as e:
-        print(f"process_cluster - calc - {e}")
-        traceback.print_exc()
-        return cluster_id, dict()
+        message_history = [{
+            "role": "user",
+            "content": [{"type": "text", "text": case_classification_prompt}]
+        }]
+
+        try:
+            case_classification = adaptor.chat.completions.create(
+                pydantic_model=CaseClassification,
+                num_retries=25,
+                model="gpt-4o-mini",
+                messages=message_history,
+                max_tokens=4096,
+                stream=False
+            )
+        except Exception as e:
+            print(f"remove_duplicate_cluster - classification adaptor call error: {e}")
+            traceback.print_exc()
+            case_classification = None
+
+        if case_classification:
+            classification_data = case_classification.model_dump()
+            classification_data['customer_query'] = clean_control_chars(classification_data.get('customer_query',''))
+            classification_data['case_summary'] = clean_control_chars(classification_data.get('case_summary',''))
+            classification_data['case_root_cause'] = clean_control_chars(classification_data.get('case_root_cause',''))
+            classification_data['custcase_recommendationomer_query'] = clean_control_chars(classification_data.get('case_recommendation',''))
+
+            classification_data['case_numbers'] = cluster_case_numbers
+            classification_data['case_count'] = len(cluster_case_numbers)
+            classification_data['cluster_cases_str'] = cluster_cases_str
+
+            cluster_case_classification_analysis[selected_cluster_id] = classification_data
+
+    return cluster_case_classification_analysis
 
 def analysis_process(file_name):
     try:
         file_path = '/home/ec2-user/kathiravan'
         input_file_name = f"{file_path}/input/{file_name}"
         
-        # Read Input file
+        # Load data
         df = pd.read_excel(input_file_name)
-        
-        #Filter first 100 count
-        #df = df[0:500]
-
-        # Closed case only
-        df = df[df['Status'] == 'Closed']
-
-        # Condition for sub product
-        #df = df[df['Customer Asset'].str.contains('Integrated Fleets Paragon', case=False, na=False)]
+        #df = df.sample(n=5000, random_state=42)  # Limit rows for analysis
+        df = df[df['Status'] == 'Closed']  # Only closed cases
+	    #df = df[df['Customer Asset'].str.contains('ProcessPro Premier', case=False, na=False)]
 
         df_copy = df.copy()
 
@@ -405,47 +459,106 @@ def analysis_process(file_name):
 
         df.columns = (
             df.columns
-            .str.strip()
-            .str.lower()
-            .str.replace(' ', '_')
-            .str.replace('/', '')
-            .str.replace(':', '')
+              .str.strip()
+              .str.lower()
+              .str.replace(' ', '_')
+              .str.replace('/', '')
+              .str.replace(':', '')
         )
 
         df['case_info'] = df.apply(get_case_info, axis=1)
+        df['combined_case_input'] = df[['subject', 'description', 'resolution_summary']].fillna('').agg('\n'.join, axis=1)
         case_cluster_df = cluster_case(df)
-
-        case_cluster_df_groupby = case_cluster_df.groupby('cluster')
-
-        print(f"Clouster size -- {len(case_cluster_df_groupby)}")
-
-        # Parallel execution
+        
         cluster_case_classification_analysis = {}
 
+        case_cluster_df_groupby = case_cluster_df.groupby('cluster')
+        print(f"Initial Cluster size -- {len(case_cluster_df_groupby)}")
+
+        # Parallel cluster classification
         with ProcessPoolExecutor(max_workers=32) as executor:
             futures = [
                 executor.submit(process_cluster, cluster_id, cluster_df)
                 for cluster_id, cluster_df in case_cluster_df_groupby
             ]
-
             for future in as_completed(futures):
                 cluster_id, result = future.result()
                 if result:
                     cluster_case_classification_analysis[cluster_id] = result
 
-        for cluster_id, case_dict in cluster_case_classification_analysis.items():
-            case_dict["kb_article_number"] = ""
-            case_dict["kb_title"] = ""
-            case_dict["kb_problem"] = ""
-            case_dict["kb_solution"] = ""
+        #intermediate_df = pd.DataFrame.from_dict(cluster_case_classification_analysis, orient='index').reset_index(drop=True)
+        #intermediate_df.to_excel("intermediate_df.xlsx")
+        
+        # Deduplicate Admin Issue clusters
+        cluster_case_classification_analysis = remove_duplicate_cluster(cluster_case_classification_analysis)
 
-            if 'insight_category' in case_dict and case_dict['insight_category'] == 'Knowledge Base Candidate':
+        cluster_case_classification_analysis = remove_duplicate_cluster(cluster_case_classification_analysis)
+
+        print(f"Final Cluster size -- {len(cluster_case_classification_analysis)}")
+        
+        # Enrich each cluster with statistics
+        for cluster_id, case_dict in cluster_case_classification_analysis.items():
+            cluster_df = df[df['case_number'].isin(case_dict['case_numbers'])].copy()
+
+            # Convert dates
+            datetime_format = "%m/%d/%Y %I:%M %p"
+            cluster_df['datetime_opened'] = pd.to_datetime(cluster_df['datetime_opened'], format=datetime_format, errors='coerce')
+            cluster_df['datetime_closed'] = pd.to_datetime(cluster_df['datetime_closed'], format=datetime_format, errors='coerce')
+
+            # Calculate resolution days
+            cluster_df['resolution_days'] = (cluster_df['datetime_closed'] - cluster_df['datetime_opened']).dt.total_seconds() / 86400
+            if 'resolution_days' in cluster_df and not cluster_df['resolution_days'].isna().all():
+                case_dict['avg_resolution_days'] = round(cluster_df['resolution_days'].mean(), 2)
+                case_dict['median_resolution_days'] = round(cluster_df['resolution_days'].median(), 2)
+                case_dict['p95_resolution_days'] = round(np.percentile(cluster_df['resolution_days'].dropna(), 95), 2)
+            else:
+                case_dict['avg_resolution_days'] = case_dict['median_resolution_days'] = case_dict['p95_resolution_days'] = ""
+
+            # Satisfaction score
+            satisfaction_col = 'overall_satisfaction' if 'overall_satisfaction' in cluster_df.columns else 'overall_atisfaction'
+            if satisfaction_col in cluster_df and not cluster_df[satisfaction_col].isna().all():
+                case_dict['avg_satisfaction_score'] = round(cluster_df[satisfaction_col].mean(), 2)
+                case_dict['median_satisfaction_score'] = round(cluster_df[satisfaction_col].median(), 2)
+                case_dict['p25_satisfaction_score'] = round(np.percentile(cluster_df[satisfaction_col].dropna(), 25), 2)
+                case_dict['p95_satisfaction_score'] = round(np.percentile(cluster_df[satisfaction_col].dropna(), 95), 2)
+            else:
+                case_dict['avg_satisfaction_score'] = case_dict['median_satisfaction_score'] = \
+                case_dict['p25_satisfaction_score'] = case_dict['p95_satisfaction_score'] = ""
+
+            # Customer distribution
+            if 'account_name' in cluster_df.columns:
+                cust_counts = cluster_df['account_name'].dropna().value_counts()
+                case_dict['ticket_distribution'] = "; ".join(f"{name}:{count}" for name, count in cust_counts.items())
+                case_dict['top_5_customers'] = "; ".join(f"{name}:{count}" for name, count in cust_counts.head(5).items())
+            else:
+                case_dict['ticket_distribution'] = case_dict['top_5_customers'] = ""
+
+            # Severity distribution
+            if 'case_severity' in cluster_df.columns:
+                sev_counts = cluster_df['case_severity'].dropna().value_counts()
+                case_dict['case_severity_distribution'] = "; ".join(f"{sev}:{count}" for sev, count in sev_counts.items())
+            else:
+                case_dict['case_severity_distribution'] = ""
+
+            # Product versions
+            versions = cluster_df.get('product_version_name', pd.Series()).dropna().unique().tolist()
+            case_dict['product_version_name'] = ', '.join(versions) if versions else ""
+
+        # Generate KB summaries
+        for case_dict in cluster_case_classification_analysis.values():
+            case_dict.update({
+                "kb_article_number": "",
+                "kb_title": "",
+                "kb_problem": "",
+                "kb_solution": ""
+            })
+
+            if case_dict.get('kb_candidate') == 'Y':
                 case_numbers = case_dict.get('case_numbers', [])
 
-                # Filter rows with matching case numbers
                 filtered_df = df[df['case_number'].isin(case_numbers)]
-
-                # Filter rows where KB fields are NOT None or empty
+                filtered_df = filtered_df.drop_duplicates(subset='article_number')
+                
                 required_cols = ['article_number', 'title', 'problem', 'resolution']
                 filtered_df = filtered_df[
                     filtered_df[required_cols].notna().all(axis=1) &
@@ -453,31 +566,29 @@ def analysis_process(file_name):
                 ]
 
                 kb_article = None
-                if not filtered_df.empty:
-                    result_list = filtered_df.to_dict(orient='records')
-                    kb_article = kb_analysis(case_dict, result_list)
-                else:
-                    kb_article = kb_analysis(case_dict)
+                try:
+                    result_list = filtered_df.to_dict(orient='records') if not filtered_df.empty else None
+                    kb_article = kb_analysis(case_dict, result_list) if result_list else kb_analysis(case_dict)
+                except Exception as e:
+                    print(f"Generate KB summaries - error: {e}")
+                    traceback.print_exc()
 
-                # Extract output fields from result (single KB article model)
+
                 if kb_article:
                     case_dict["kb_article_number"] = kb_article.get('article_number', '')
-                    case_dict["kb_title"] = kb_article.get('title', '')
-                    case_dict["kb_problem"] = kb_article.get('problem', '')
-                    case_dict["kb_solution"] = kb_article.get('solution', '')
+                    case_dict["kb_title"] = clean_control_chars(kb_article.get('title', ''))
+                    case_dict["kb_problem"] = clean_control_chars(kb_article.get('problem', ''))
+                    case_dict["kb_solution"] = clean_control_chars(kb_article.get('solution', ''))
 
-        # Product Line Name
-        product_name=df['product_line'].tolist()[0]
-
-        # Output file name
+        # Save Excel output
+        product_name = df['product_line'].iloc[0]
         output_file_name = f"{file_path}/output/{product_name}_AI Analysis.xlsx"
 
-        result_df = pd.DataFrame.from_dict(cluster_case_classification_analysis, orient='index').reset_index()
-        result_df = result_df.drop(columns=["index"])
+        result_df = pd.DataFrame.from_dict(cluster_case_classification_analysis, orient='index').reset_index(drop=True)
+        result_df.drop(columns=['cluster_cases_str'], errors='ignore', inplace=True)
 
-        # Save both sheets in one Excel file
         with pd.ExcelWriter(output_file_name, engine='openpyxl') as writer:
-            # Sheet 1: Full cluster details
+            # Full detailed output
             custom_column_names = {
                 'LV1': 'LV1',
                 'LV2': 'LV2',
@@ -499,103 +610,116 @@ def analysis_process(file_name):
                 'ticket_distribution': 'Customer Ticket Distribution',
                 'top_5_customers': 'Top-5 Customers by Tickets',
                 'case_severity_distribution': 'Case Severity Distribution',
+                "kb_candidate": 'Knowledge Base Candidate',
                 'kb_article_number': 'KB Article Number',
                 'kb_title': 'KB Title',
                 'kb_problem': 'KB Problem',
                 'kb_solution': 'KB Solution'
             }
 
-            # Apply column renaming
             detailed_output_df = result_df.rename(columns=custom_column_names)
             detailed_output_df.to_excel(writer, index=False, sheet_name="Detailed Output")
-            
-            insight_categories = result_df['insight_category'].unique().tolist()
-            insight_categories = [c for c in insight_categories if pd.notna(c) and str(c).strip() and c != "Other"]
 
-            for insight_category in  insight_categories:
-                if insight_category == "Knowledge Base Candidate":
-                    # KB Candidate Summary
-                    kb_df = result_df[result_df['insight_category'] == 'Knowledge Base Candidate'].copy()
-                    kb_filtered_df = kb_df[
-                            [
-                                'kb_article_number', 'kb_title', 'kb_problem', 'kb_solution', 'case_summary', 'case_root_cause', 'case_recommendation', 'case_numbers',
-                                'case_count', 'product_version_name', 'avg_resolution_days', 'median_resolution_days', 'avg_satisfaction_score', 'median_satisfaction_score',
-                                'ticket_distribution', 'top_5_customers', 'case_severity_distribution'
-                            ]
-                        ].sort_values(by='case_count', ascending=False)
+            # Per-insight category summaries
+            insight_categories = result_df['insight_category'].dropna().unique().tolist()
+            insight_categories = [cat for cat in insight_categories if str(cat).strip() and cat != "Other"]
 
-                    kb_filtered_df.rename(columns={
-                            'kb_article_number': 'KB Article Number',
-                            'kb_title': 'KB Title',
-                            'kb_problem': 'KB Problem',
-                            'kb_solution': 'KB Solution',
-                            'case_summary': 'Case Summary',
-                            'case_root_cause': 'Root Cause',
-                            'case_recommendation': 'Recommendation',
-                            'case_numbers': 'Case Numbers',
-                            'case_count': 'Case Count',
-                            'product_version_name': 'Product Version Name',
-                            'avg_resolution_days': 'Average Resolution Days',
-                            'median_resolution_days': 'Median Resolution Days',
-                            'avg_satisfaction_score': 'Average Satisfaction Score',
-                            'median_satisfaction_score': 'Median Satisfaction Score',
-                            'ticket_distribution': 'Customer Ticket Distribution',
-                            'top_5_customers': 'Top-5 Customers by Tickets',
-                            'case_severity_distribution': 'Case Severity Distribution'
-                        }, inplace=True)
+            for category in insight_categories:
+                category_df = result_df[result_df['insight_category'] == category].copy()
+                category_df = category_df[
+                    [
+                        'LV3', 'case_summary', 'case_root_cause', 'case_recommendation', 'case_numbers',
+                        'case_count', 'product_version_name', 'avg_resolution_days', 'median_resolution_days',
+                        'avg_satisfaction_score', 'median_satisfaction_score',
+                        'ticket_distribution', 'top_5_customers', 'case_severity_distribution'
+                    ]
+                ].sort_values(by='case_count', ascending=False)
 
-                    kb_filtered_df.to_excel(writer, index=False, sheet_name="Knowledge Base Candidate")
+                category_df.rename(columns={
+                        'LV3': category,
+                        'case_summary': 'Case Summary',
+                        'case_root_cause': 'Root Cause',
+                        'case_recommendation': 'Recommendation',
+                        'case_numbers': 'Case Numbers',
+                        'case_count': 'Case Count',
+                        'product_version_name': 'Product Version Name',
+                        'avg_resolution_days': 'Average Resolution Days',
+                        'median_resolution_days': 'Median Resolution Days',
+                        'avg_satisfaction_score': 'Average Satisfaction Score',
+                        'median_satisfaction_score': 'Median Satisfaction Score',
+                        'ticket_distribution': 'Customer Ticket Distribution',
+                        'top_5_customers': 'Top-5 Customers by Tickets',
+                        'case_severity_distribution': 'Case Severity Distribution'
+                    }, inplace=True)
+                category_df.to_excel(writer, index=False, sheet_name=category)
 
-                else:
-                    category_df = result_df[result_df['insight_category'] == insight_category].copy()
-                    category_df = category_df[
-                            [
-                                'LV3', 'case_summary', 'case_root_cause', 'case_recommendation', 'case_numbers',
-                                'case_count', 'product_version_name', 'avg_resolution_days', 'median_resolution_days', 'avg_satisfaction_score', 'median_satisfaction_score',
-                                'ticket_distribution', 'top_5_customers', 'case_severity_distribution'
-                            ]
-                        ].sort_values(by='case_count', ascending=False)
-                        
-                    category_df.rename(columns={
-                            'LV3': insight_category,
-                            'case_summary': 'Case Summary',
-                            'case_root_cause': 'Root Cause',
-                            'case_recommendation': 'Recommendation',
-                            'case_numbers': 'Case Numbers',
-                            'case_count': 'Case Count',
-                            'product_version_name': 'Product Version Name',
-                            'avg_resolution_days': 'Average Resolution Days',
-                            'median_resolution_days': 'Median Resolution Days',
-                            'avg_satisfaction_score': 'Average Satisfaction Score',
-                            'median_satisfaction_score': 'Median Satisfaction Score',
-                            'ticket_distribution': 'Customer Ticket Distribution',
-                            'top_5_customers': 'Top-5 Customers by Tickets',
-                            'case_severity_distribution': 'Case Severity Distribution'
-                        }, inplace=True)
+            # KB Candidate sheet
+            kb_df = result_df[result_df['kb_candidate'] == 'Y'].copy()
+            if not kb_df.empty:
+                kb_df = kb_df[
+                    [
+                        'kb_article_number', 'kb_title', 'kb_problem', 'kb_solution', 'case_summary', 'case_root_cause',
+                        'case_recommendation', 'case_numbers', 'case_count', 'product_version_name',
+                        'avg_resolution_days', 'median_resolution_days',
+                        'avg_satisfaction_score', 'median_satisfaction_score',
+                        'ticket_distribution', 'top_5_customers', 'case_severity_distribution'
+                    ]
+                ].sort_values(by='case_count', ascending=False)
 
-                    category_df.to_excel(writer, index=False, sheet_name=insight_category)
+                kb_df.rename(columns={
+                        'kb_article_number': 'KB Article Number',
+                        'kb_title': 'KB Title',
+                        'kb_problem': 'KB Problem',
+                        'kb_solution': 'KB Solution',
+                        'case_summary': 'Case Summary',
+                        'case_root_cause': 'Root Cause',
+                        'case_recommendation': 'Recommendation',
+                        'case_numbers': 'Case Numbers',
+                        'case_count': 'Case Count',
+                        'product_version_name': 'Product Version Name',
+                        'avg_resolution_days': 'Average Resolution Days',
+                        'median_resolution_days': 'Median Resolution Days',
+                        'avg_satisfaction_score': 'Average Satisfaction Score',
+                        'median_satisfaction_score': 'Median Satisfaction Score',
+                        'ticket_distribution': 'Customer Ticket Distribution',
+                        'top_5_customers': 'Top-5 Customers by Tickets',
+                        'case_severity_distribution': 'Case Severity Distribution'
+                    }, inplace=True)
 
-        reprot_process(product_name, df_copy, output_file_name)
- 
+                kb_df.to_excel(writer, index=False, sheet_name="Knowledge Base Candidate")
+
+        # Final report trigger
+        report_process(product_name, df_copy, output_file_name)
         print("-- Completed --")
+
     except Exception as e:
         print(f"analysis_process - error: {e}")
-    
+        traceback.print_exc()
+
 if __name__ == "__main__":
 
     erp_names = [
-        'Impress',
-        #'WorkWise ERP',
-        #"Gould Hall"
-        #'Traverse Global'
-        #'ProcessPro',
-        #'Paragon'
+        'Made2Manage',
     ]
 
     for erp_name in erp_names:
         try:
             file_name = f"{erp_name}_case_list.xlsx"
+            print(f"\n--- Starting analysis for: {file_name} ---")
             analysis_process(file_name)
         except Exception as e:
-            print(e)
+            print(f"Error processing {file_name}: {e}")
+
+    # product_name = 'Made2Manage'
+    # file_name = f"{product_name}_case_list.xlsx"
+    # file_path = '/home/ec2-user/kathiravan'
+    # input_file_name = f"{file_path}/input/{file_name}"
     
+    # # Load data
+    # df = pd.read_excel(input_file_name)
+    # #df = df.head(1000)  # Limit rows for analysis
+    # df = df[df['Status'] == 'Closed']  # Only closed cases
+    # #df = df[df['Customer Asset'].str.contains('ProcessPro Premier', case=False, na=False)]
+
+    # df_copy = df.copy()
+    # report_process(product_name, df_copy, "/home/ec2-user/kathiravan/output/Made2Manage_AI Analysis.xlsx")
