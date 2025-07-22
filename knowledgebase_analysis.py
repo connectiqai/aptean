@@ -65,12 +65,11 @@ You are a senior support knowledge engineer responsible for maintaining and impr
 Your task is to check if the existing knowledgebase articles can address the issues or queries mentioned across these support cases:
 
 1. If an exact or very close matching KB article is found that could holistically address the issues or queries across support cases:
-    - Return the matching article_number and mention that 'A relevant KB article already existed to address such issues across different support cases raised'
     - Return the matching article_number along with title, problem and solution
  
 2. If no exact matching knowledgebase article is found that could fully address the issues or queries across support cases, but if it could be enhances slightly or enriched with some more relevant information to address the issues or queries:
-    - Return the 'article_number' that needs to be updated, including the 'title' and 'problem' of the existing KB article and the 'Solution' part of the existing KB article with revised steps or insights to address such issues
- 
+    - Return the article_number that needs to be updated, including the title, problem and solution part of the existing KB article with revised steps or insights to address such issues
+
 3. If none of the existing knowledgebase articles are relevant to address such issues or queries across support cases and a new knowledgebase article needs to be created to holistically address such issues or queries across support cases:
     - Return a new entry with following details:
     - article_number: Leave empty
@@ -110,9 +109,9 @@ adaptor = PydanticAdaptorOpenRouter(
 )
 
 class KBArticle(BaseModel):
-    article_number: Optional[str] = Field(
+    article_number: Optional[int] = Field(
         default=None,
-        description="A unique identifier for the knowledge base article. Leave empty if this is a suggested new article."
+        description="A unique numeric identifier for the knowledge base article. Leave empty (null) if this is a suggested new article."
     )
     title: str = Field(..., description="A short, one-line title that briefly and clearly summarizes the support case.")
     problem: str = Field(..., description="A detailed explanation of the root cause of the issue described in the support case.")

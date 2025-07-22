@@ -226,7 +226,7 @@ def summary_report(product_name, input_data):
         worksheet.write(f'E{i}', row['median_resolution_in_days'], border_center)
         worksheet.write(f'F{i}', row['contribution_on_total_inflow'] / 100.0, border_center_percent)
         worksheet.write(f'G{i}', row['impact_on_saas_customers_inflow'] / 100.0, border_center_percent)
-        worksheet.write(f'H{i}',row['case_severity'],border)
+        worksheet.write(f'H{i}',row['case_severity'],wrap_left)
         top10_LV3_total_cases += row['cases']
         top10_LV3_total_per += row['contribution_on_total_inflow']
 
