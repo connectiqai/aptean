@@ -5,6 +5,41 @@ import math
 import xlsxwriter
 import pandas as pd
 
+case_analysis_columns = [
+    ("Product Name", "Product Name", "Name of the product associated with the case data."),
+    ("Unique Customers", "Unique Account Name", "Count of distinct customer accounts involved in the dataset."),
+    ("Versions Analysed", "Version Analysed", "Product versions included in the analysis."),
+    ("SaaS Customers Count", "SaaS Accounts", "Number of unique accounts flagged as SaaS (`Has SaaS Asset = True`)."),
+    ("Date Range for Cases Analysis", "Time Period", "The start and end dates for the case analysis period."),
+    ("Total Cases", "Total Volume", "Total number of support cases included in the analysis."),
+    ("Open Cases", "Unresolved Cases", "Number of cases that are currently open or pending."),
+    ("Closed Cases", "Resolved Cases", "Number of cases marked as closed or resolved."),
+    ("LV1 (Top-Level Category)", "High-Level Case Grouping", "Broad classification to show overall themes across issues or product areas."),
+    ("LV2 (Mid-Level Category)", "Mid-Level Grouping", "A narrower grouping under LV1, representing more specific issue types."),
+    ("LV3 (Granular Category)", "Detailed Classification", "The most detailed level of categorization, used to identify root causes or recurring issues."),
+    ("Top 10 LV3 Categories - Potential Impact on Case Reduction", "High-Impact LV3 Categories", "Top 10 LV3 categories by volume, often targeted for proactive improvements."),
+	("LV1 High-Level Categories (Top 10)", "Top LV1 Categories by Volume", "Top 10 LV1 categories based on number of cases."),
+    ("Defect", "Defect %", "Defect % - Not from Salesforce data it's from our insights"),
+    ("LV3 Granular Categories (Top 10)", "Top LV3 Categories by Volume", "Top 10 LV3 categories based on number of cases."),
+    ("Average Resolution (in days)", "Mean Time to Resolution", "The average number of days taken to resolve cases. Reflects overall support efficiency."),
+    ("Median Resolution Days", "Median", "The middle value of resolution days when sorted. Useful for avoiding outlier distortion."),
+    ("Accounts Across LV3 Categories", "Account Name", "Top 20 accounts based on the number of cases in LV3 categories."),
+    ("Accounts that are Top Case Contributors", "Account Name", "Accounts contributing the highest number of cases overall."),
+    ("Impact on SaaS Customers", "SaaS Customer", "Percentage of cases from SaaS customers: `SaaS cases / (SaaS + On-prem cases)`."),
+    ("Case Severity", "Case Severity", "Distribution of case counts across severity levels (e.g., Low, Medium, Critical)."),
+    ("Category Insight", "Classification of Cases", "Groups cases into logical Insight Categories based on issue cause or type."),
+    (">------Feature Enhancement", "Functionality improvement request", "Requests from customers to improve or add new functionality not currently available in the product."),
+    (">------Software Bug","Software Bug (Analysed on Closed Cases Only)","Issues caused by defects or errors in the software code leading to system failures or incorrect behavior."),
+    (">------Data Error","Incorrect/missing data","Cases involving incorrect, missing, or inconsistent data - often due to manual input, import issues, or migration."),
+    (">------Module Issue","Module-specific problem","Issues related to a specific product module (e.g., Reporting or Scheduling), often due to limitations or misuse rather than bugs."),
+    (">------Integration","External system issue","Cases arising from problems with third-party integrations, APIs, or external systems (e.g., ERP, CRM)."),
+    (">------Setup Issue","Configuration error","Cases caused by misconfiguration or incomplete setup of the environment, settings, or deployment parameters."),
+    (">------Process Gap","Needs Customization","Business needs not fully supported by the product, requiring manual workarounds or customization."),
+    (">------Admin Issue","Access or role issue","Issues related to user permissions, roles, or access control, typically managed by customer admins."),
+    (">------Educational Issue","Training/documentation gap","Support cases driven by lack of user training, product knowledge, or improper usage."),
+    (">------Knowledge Base Candidate","Potential Help Article","High-value or frequently repeated cases suitable for documentation as FAQs, KB articles, or help content.")
+]
+
 # Estimate number of wrapped lines
 def estimate_lines(text, col_width_chars):
     lines = text.split('\n')
@@ -23,7 +58,7 @@ def summary_report(product_name, input_data):
     # Base font
     font_base = {'font_name': 'Aptos Narrow', 'font_size': 10}
     wrap = workbook.add_format({**font_base, 'text_wrap': True})
-    wrap_left = workbook.add_format({**font_base, 'text_wrap': True, 'align': 'left', 'valign': 'vtop', 'border': 1})
+    wrap_left = workbook.add_format({**font_base, 'text_wrap': True, 'align': 'left', 'valign': 'top', 'border': 1})
 
     worksheet.set_column('B:B', 35, wrap)
     worksheet.set_column('C:I', 20, wrap)
@@ -184,6 +219,7 @@ def summary_report(product_name, input_data):
     worksheet.write(f'B{i}', 'Category Names', header_wrap_colored)
     worksheet.write(f'C{i}', 'Case count', header_wrap_colored)
     worksheet.write(f'D{i}', 'Contribution on Total Case Inflow', header_wrap_colored)
+    worksheet.write(f'E{i}','Defect %',header_wrap_colored)
 
     top10_LV1_total_cases=0
     top10_LV1_total_per=0
@@ -192,6 +228,7 @@ def summary_report(product_name, input_data):
         worksheet.write(f'B{i}', row['category'], border)
         worksheet.write(f'C{i}', row['cases'], border_center)
         worksheet.write(f'D{i}', row['contribution_on_total_inflow'] / 100.0, border_center_percent)
+        worksheet.write(f'E{i}', row['defect_percent']/100.0,border_center_percent)
         top10_LV1_total_cases += row['cases']
         top10_LV1_total_per += row['contribution_on_total_inflow']
 
@@ -247,10 +284,12 @@ def summary_report(product_name, input_data):
     worksheet.set_row(i-1, 30) 
     worksheet.write(f'B{i}', 'Insight Category Names', header_wrap_colored)
     worksheet.write(f'C{i}', 'Case Count', header_wrap_colored)
-    worksheet.write(f'D{i}', 'Potential Impact on Inflow%', header_wrap_colored)
-    worksheet.write(f'E{i}', 'Top 10 Total Cases', header_wrap_colored)
-    worksheet.write(f'F{i}', 'Potential Impact on Inflow%', header_wrap_colored)
+    worksheet.write(f'D{i}', 'Potential Impact on Total Case Inflow%', header_wrap_colored)
+    worksheet.write(f'E{i}', 'Total Cases from respective Top 10 LV3 items', header_wrap_colored)
+    worksheet.write(f'F{i}', 'Potential Impact on Total Case Inflow%', header_wrap_colored)
 
+    sumOfTop20Cases = 0
+    sumOfTop20Impact = 0
     for row in input_data['contributors']:
         i += 1
         worksheet.write(f'B{i}', row['contributor'], border)
@@ -258,6 +297,13 @@ def summary_report(product_name, input_data):
         worksheet.write(f'D{i}', row['potential_impact'] / 100.0, border_center_percent)
         worksheet.write(f'E{i}', row['top_20_cases'], border_center)
         worksheet.write(f'F{i}', row['top_20_impact']/100.0, border_center_percent)
+        sumOfTop20Cases +=row['top_20_cases']
+        sumOfTop20Impact +=row['top_20_impact']
+    
+    i += 1
+    worksheet.merge_range(f'B{i}:D{i}', 'TOTAL', bold_right)
+    worksheet.write(f'E{i}', sumOfTop20Cases, bold_right)
+    worksheet.write(f'F{i}', sumOfTop20Impact/100, bold_right_percent)
     
     i += 2
     worksheet.merge_range(f'B{i}:G{i}', 'Case Prevention Potential- Insight Categry Wise', aqua_header_colored)
@@ -272,10 +318,11 @@ def summary_report(product_name, input_data):
             worksheet.write(f'C{i}', 'Top 10', border)
 
             i += 1
-            worksheet.merge_range(f'B{i}:G{i}', key, header_colored)
-            worksheet.write(f'H{i}', 'Case Count', header_colored)
-            worksheet.write(f'I{i}', 'Business Impact', header_colored)
-            worksheet.write(f'J{i}','Case Severity',header_colored)
+            title_text = key if key == "Knowledge Base Candidate" else f"LV3 {key}"
+            worksheet.merge_range(f'B{i}:E{i}',title_text, header_colored)
+            worksheet.write(f'F{i}', 'Case Count', header_colored)
+            worksheet.write(f'G{i}', 'Business Impact', header_colored)
+            worksheet.write(f'H{i}','Case Severity',header_colored)
 
             cont_sum = 0
             cont_case_sum = 0
@@ -284,18 +331,18 @@ def summary_report(product_name, input_data):
                 estimated_lines = estimate_lines(row['title'], 155)
                 row_height = estimated_lines * 15
                 worksheet.set_row(i-1, row_height)
-                worksheet.merge_range(f'B{i}:G{i}', row['title'], wrap_left)
-                worksheet.write(f'H{i}', row['case_count'], normal_right)
-                worksheet.write(f'I{i}', row['business_impact'] / 100.0, normal_right_percent)
-                worksheet.write(f'J{i}',row['case_severity'],wrap_left)
+                worksheet.merge_range(f'B{i}:E{i}', row['title'], wrap_left)
+                worksheet.write(f'F{i}', row['case_count'], normal_right)
+                worksheet.write(f'G{i}', row['business_impact'] / 100.0, normal_right_percent)
+                worksheet.write(f'H{i}',row['case_severity'],wrap_left)
                 cont_sum += row['business_impact']
                 cont_case_sum += row['case_count']
     
             i += 1
-            worksheet.merge_range(f'B{i}:G{i}', 'TOTAL IMPACT', bold_right)
-            worksheet.write(f'H{i}', cont_case_sum, bold_right)
-            worksheet.write(f'I{i}', cont_sum/100, bold_right_percent)
-            worksheet.write(f'J{i}', '', bold_right)
+            worksheet.merge_range(f'B{i}:E{i}', 'TOTAL IMPACT', bold_right)
+            worksheet.write(f'F{i}', cont_case_sum, bold_right)
+            worksheet.write(f'G{i}', cont_sum/100, bold_right_percent)
+            worksheet.write(f'H{i}', '', bold_right)
     
     i += 2
     worksheet.merge_range(f'B{i}:G{i}', 'Case Prevention Potential- Accounts Categry Wise', aqua_header_colored)
@@ -394,14 +441,18 @@ def summary_report(product_name, input_data):
      # Refrence Sheet
     worksheet2 = workbook.add_worksheet("Reference Guide")
     j=1
-    worksheet2.set_column('A:A', 50, wrap)
-    worksheet2.set_column('B:B', 50, wrap)
+    worksheet2.set_column('A:A', 60, wrap)
+    worksheet2.set_column('B:B', 80, wrap)
+    worksheet2.set_column('C:C', 80, wrap)
     worksheet2.write(f'A{j}', 'Column Name', highlight_yellow)
-    worksheet2.write(f'B{j}', 'Explanation', highlight_yellow)
+    worksheet2.write(f'B{j}', 'What It Represents', highlight_yellow)
+    worksheet2.write(f'C{j}', 'Explanation', highlight_yellow)
     
-    j += 1
-    worksheet2.write(f'A{j}', 'LV1', wrap_left)
-    worksheet2.write(f'B{j}', 'LV1 provides a very high level view of Cases Distribution across broader categories', wrap_left)
+    for row in case_analysis_columns:
+        j += 1
+        worksheet2.write(f'A{j}', row[0], wrap_left)
+        worksheet2.write(f'B{j}', row[1], wrap_left)
+        worksheet2.write(f'C{j}', row[2], wrap_left)
     
     # Account wise LV3
     i=1
@@ -469,11 +520,17 @@ def clean_and_eval(x):
     if isinstance(x, str):
         try:
             # Optional cleanup: remove leading commas or bad formatting
-            x = re.sub(r'^\[\s*,\s*', '[', x)  # fix "[,1,2,3" => "[1,2,3"
+            x = re.sub(r'^\[\s*,\s*', '[', x)
             return ast.literal_eval(x)
         except (SyntaxError, ValueError):
             return []  # or None if preferred
     return x
+
+# Function to calculate defect % for each LV1 in top 10
+def calc_software_bug_percent(lv1,analysis_df):
+    total_rows = analysis_df[analysis_df['LV1'] == lv1].shape[0]
+    defect_rows = analysis_df[(analysis_df['LV1'] == lv1) & (analysis_df['Insight Category'] == 'Software Bug')].shape[0]
+    return round((defect_rows / total_rows) * 100, 2) if total_rows > 0 else 0
 
 def report_process(product_name, cases_df, output_file_path):
     try:
@@ -505,6 +562,8 @@ def report_process(product_name, cases_df, output_file_path):
         
         # Group by LV1 and sum the case_count
         lv1_summary = analysis_df.groupby('LV1')['Case Count'].sum().reset_index()
+        #lv1_summary = analysis_df.groupby('LV1').agg(Case_Count=('Case Count', 'sum'), Row_Count=('LV1', 'size')).reset_index()
+
 
         # Sort by case_count in descending order
         lv1_top10 = lv1_summary.sort_values(by='Case Count', ascending=False).head(10).copy()
@@ -573,7 +632,8 @@ def report_process(product_name, cases_df, output_file_path):
                 "category": row['LV1'],
                 "cases": int(row['Case Count']),
                 "contribution_on_total_inflow": round(row['Case Count'] / input_data['closed_cases'] * 100, 2),
-                "impact_on_saas_customers_inflow": int(row.get('Impact on SaaS Customers Inflow', 0))
+                "impact_on_saas_customers_inflow": int(row.get('Impact on SaaS Customers Inflow', 0)),
+                "defect_percent":calc_software_bug_percent(row['LV1'],analysis_df)
             })
 
         input_data['high_level_top_10_categories'] = top10_LV1_json
@@ -599,6 +659,28 @@ def report_process(product_name, cases_df, output_file_path):
                 'top_20_cases':int(top_20_cases),
                 'top_20_impact':round((top_20_cases / input_data['closed_cases']) * 100 if total_cases > 0 else 0,2)
             })
+        # Add Knowledge Base Candidate as a separate contributor
+        try:
+            kb_df = pd.read_excel(output_file_path, sheet_name="Knowledge Base Candidate").fillna("")
+            kb_df.columns = kb_df.columns.str.strip()
+
+            # Total and Top 10 case count
+            kb_total = kb_df['Case Count'].sum()
+            kb_top_20 = kb_df.sort_values(by='Case Count', ascending=False).head(top_count)
+            kb_top_20_sum = kb_top_20['Case Count'].sum()
+
+            # Append to contributors
+            contributors.append({
+                'contributor': "Knowledge Base Candidate",
+                'total_cases': int(kb_total),
+                'potential_impact': round((kb_total / input_data['closed_cases']) * 100 if input_data['closed_cases'] > 0 else 0, 2),
+                'top_20_cases': int(kb_top_20_sum),
+                'top_20_impact': round((kb_top_20_sum / input_data['closed_cases']) * 100 if input_data['closed_cases'] > 0 else 0, 2)
+            })
+
+        except Exception as e:
+            print("Could not add 'Knowledge Base Candidate':", e)
+
 
         # Add to input_data
         input_data['contributors'] = contributors

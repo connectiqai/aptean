@@ -35,7 +35,7 @@ due to their similar issue patterns and underlying themes. Your task is to analy
 descriptive topic that accurately summarizes the core problem or theme represented by this cluster. Provide a detailed explanation of why this 
 topic best represents the pattern observed in these cases. Do not assume anything and your analysis should be purley on the basis of the data provided.
 
-Here is some information regarding the categories available to you
+Here is some information regarding the categories available to you and Return a consistent category name.
 <CATEGORIES INFO>
 {categories_info}
 </CATEGORIES INFO>
@@ -82,6 +82,17 @@ Use the following guidelines based on the category assigned:
 
 Be structured, technical, and specific in both your root cause and your recommendation. Avoid vague terms like "issue", "problem", or "error". Write in a way that would inform product, support, or engineering teams about what to actually fix or implement.
 
+You are expected to produce a structured response containing the following fields exactly as specified. Do not omit or rename any field:
+- lv1
+- lv2
+- lv3
+- insight_category
+- customer_query
+- case_summary
+- case_root_cause
+- case_recommendation
+- kb_candidate (must be either 'Y' or 'N' based on strict criteria)
+
 Here is some information explaning the schema of the case information provided to you
 <CASE INFORMATION SCHEMA DESCRIPTION>
 {tag_info}
@@ -110,10 +121,11 @@ categories_info = """
     - Module Issue: If an issue is directly related to a module or a set of modules and is not related to integrations, 
     a technical bug, or a feature enhancement, then classify it as a module issue. 
 
-    - Admin Issue: If an issue is involves admin related stuff such as adding users, removing users, ip whitelisting
-    or other admin related tasks, then classify them as an admin issue.
+    - Admin Issue: If an issue involves admin related tasks such as adding users, removing users, managing user authentication 
+    (including login issues, password resets, account lockouts), configuring user roles and permissions, IP whitelisting, or any other 
+    administrative or user management related task, then classify it as an Admin Issue.
 
-     - Data Error: If an issue is directly related to data corruption issue or any form of data issue but is not related to any integration issue, 
+    - Data Error: If an issue is directly related to data corruption issue or any form of data issue but is not related to any integration issue, 
     feature enhancement, any module specific issue or any other technical issue then classify it as a Data Error.
 
     - Setup Issue: If an issue is directly related to a system setup issue, or a product configuration issue but is not related to any integration issue, data corruption issue, feature enhancement, 
@@ -126,21 +138,18 @@ categories_info = """
     - Educational Issue: If an issue is directly not related to any issues, process gaps in support process or cannot be addressed by a simple knowledge base article, 
     and a tutorial that is properly educational could be better suited for the given issue or situation, then classify it as an educational issue.
 
-    - Other: If an issue does not follow in any of these categories. Classify it as other. When you classify an issue
-    as other. Provide a name for a category that should be created that will represent the class of issues represented
-    by this current issue. Only do this if the issue cannot be clearly placed in any of the above mentioned categories.
-    Also, provide reasoning behinf why it could not be placed in any of the above mentioned categories and why the suggested
-    name is a good category name for the class of issues represented by the current issue
+    - Other Miscellaneous: If an issue does not fall under any of these categories then classify it under Other Miscellaneous.
+    Only do this if the issue cannot be clearly placed in any of the above mentioned categories.
 """
 
 adaptor = PydanticAdaptorOpenRouter(openai_client=None, openai_api_key=os.getenv('OPENROUTER_API_KEY'))
 
 class CaseClassification(BaseModel):
-    LV1: str = Field(..., description="Broad functional area such as Access, Reporting, Integration, Admin, Very high level modules etc. There should not be duplicates or similar sounding group names within this group and should not be duplicates or similar sounding names across  LV2 and LV3 groups.")
+    lv1: str = Field(..., description="Recommend a group name that represents broad functional area such as Access, Reporting, Integration, Admin, Very high level module etc. There should not be duplicates or similar sounding group names (Example: 'Performance' and 'Performance Issues' are same and only one of the two should exist) within this group and should not be duplicates or similar sounding names across  lv2 and lv3 groups. Also, the names should not match any of the following names 'Integration', 'Software Bug', 'Feature Enhancement', 'Module Issue', 'Admin Issue', 'Data Error', 'Setup Issue', 'Process Gap', 'Educational Issue'). Come up with an alternate relevant name if it matches any of these names, Use consistent Title Case and ensure the name is a **singular category** (e.g., use 'Report' instead of 'Reports')")
  
-    LV2: str = Field(..., description="Specific product modules, workflow, or component within the product that would typically come under their parent LV1 category. There should not be duplicates or similar sounding names within this group and should not be duplicates similar sounding names across  LV1 and LV3 groups. Note that LV2 will have their respective LV3 children")
+    lv2: str = Field(..., description="Recommend a group name that represents specific product modules, workflow, or component within the product that would typically come under their parent lv1 category. There should not be duplicates or similar sounding names within this group and should not be duplicates similar sounding names across  lv1 and lv3 groups. Note that lv2 will have their respective lv3 children")
  
-    LV3: str = Field(..., description="Concrete technical symptoms or failure pattern (e.g., 'Login screen hangs', 'Incorrect totals in report', 'Specific Login Failures', 'Specific Product modules', 'Specific Data Discrepancies', 'Specific Setup issues', 'Specific Errors',  ). There should not be duplicates or similar sounding names within this group and should not be duplicates or similar sounding names across  LV1 and LV2 groups. If you come across suplicates or similar sounding names then try to be more specific in naming them so that users can identify the differences through the name. Note that LV3 names are the most granular leaf level categories that have their respective LV2 parents")
+    lv3: str = Field(..., description="Recommend a group name that represents concrete technical symptoms or failure pattern (e.g., 'Login screen hangs', 'Incorrect totals in report', 'Specific Login Failures', 'Specific Product modules', 'Specific Data Discrepancies', 'Specific Setup issues', 'Specific Errors',  ). There should not be duplicates or similar sounding names within this group and should not be duplicates or similar sounding names across  lv1 and lv2 groups. If you come across suplicates or similar sounding names then try to be more specific in naming them so that users can identify the differences through the name. Note that lv3 names are the most granular leaf level categories that have their respective lv2 parents")
 
     insight_category: Literal['Integration', 'Software Bug', 'Feature Enhancement', 'Module Issue', 'Admin Issue', 'Data Error', 'Setup Issue', 'Process Gap', 'Educational Issue', 'Other'] = Field(
         ..., 
@@ -169,26 +178,26 @@ class CaseClassification(BaseModel):
     kb_candidate: Literal['Y', 'N'] = Field(
         ...,
         description=(
-        "Determine if the cases could be addressed by a Knowledgebase (KB) article with absolute certainty that can enable users to self serve so they could address such issues themselves without taking support professionals help."
-        "You must assign one of the two values:"
-        "kb_candidate: Literal['Y', 'N']"
-        "Following are the criteria- Section 'A' for 'Y' and Section 'B' for 'N' "
+            "Determine if the cases could be addressed by a Knowledgebase (KB) article with absolute certainty that can enable users to self serve so they could address such issues themselves without taking support professionals help."
+            "You must assign one of the two values:"
+            "kb_candidate: Literal['Y', 'N']"
+            "Following are the criteria- Section 'A' for 'Y' and Section 'B' for 'N' "
 
-        "A. Mark 'Y' only if ALL of the following 'A.1', 'A.2', 'A.3', 'A.4' are true:"
-        "A.1. The issue occurred across multiple customers — not a one-off or unique to a specific environment."
-        "A.2. The root cause and resolution are generalizable — not tied to customer-specific configurations, data, or scripts."
-        "A.3. The fix or workaround is clear, repeatable, and can be executed by support staff or end users (e.g., configuration steps, usage clarification)."
-        "A.4. The solution can be safely documented and reused in future similar cases."
+            "A. Mark 'Y' only if ALL of the following 'A.1', 'A.2', 'A.3', 'A.4' are true:"
+            "A.1. The issue occurred across multiple customers — not a one-off or unique to a specific environment."
+            "A.2. The root cause and resolution are generalizable — not tied to customer-specific configurations, data, or scripts."
+            "A.3. The fix or workaround is clear, repeatable, and can be executed by support staff or end users (e.g., configuration steps, usage clarification)."
+            "A.4. The solution can be safely documented and reused in future similar cases."
 
-        "B. Otherwise, mark 'N' if ANY of the following are true:"
-        "B.1. The issue is unique to a single customer, environment, or custom setup."
-        "B.2. It requires engineering intervention such as a code fix, patch, or product enhancement."
-        "B.3. It involves third-party dependencies, sensitive backend changes, or one-off data cleanup."
-        "B.4. The workaround is complex, not clearly actionable, or not reusable across other cases."
-        "B.5. The case is related to a **feature enhancement**, a **software or code bug/fix**, or a **data error** that requires backend correction and cannot be addressed through documentation alone."
-        "Be conservative: only mark 'Y' when the issue is recurring, self-resolvable, and the resolution is well-suited for documentation."
+            "B. Otherwise, mark 'N' if ANY of the following are true:"
+            "B.1. The issue is unique to a single customer, environment, or custom setup."
+            "B.2. It requires engineering intervention such as a code fix, patch, or product enhancement."
+            "B.3. It involves third-party dependencies, sensitive backend changes, or one-off data cleanup."
+            "B.4. The workaround is complex, not clearly actionable, or not reusable across other cases."
+            "B.5. The case is related to a **feature enhancement**, a **software or code bug/fix**, or a **data error** that requires backend correction and cannot be addressed through documentation alone."
+            "Be conservative: only mark 'Y' when the issue is recurring, self-resolvable, and the resolution is well-suited for documentation."
+        )
     )
-)
 
 class CategoryGroup(BaseModel):
     category_name: str = Field(..., description="The name of the inferred high-level category.")
@@ -202,9 +211,7 @@ You are a support case analyst.
 You will be provided a list of cluster items, each with a cluster_id and a category (description of the issue).
 
 Your task:
-- ONLY consider user management-related categories
-- IGNORE any items that are not related to user management, such as invoicing, shipping, integration, data error, configuration issues, etc).
-- Group the relevant user management items into the following two categories:
+- Group the relevant User Access and Permissions Management items into the following two categories:
 
 1. **User Account Creation**
    - Includes: new user creation, user setup, user onboarding, user account setup, account creation in Aptean connect, User Accounts setup management, User Account creation requests, User Account setup issues, etc.
@@ -349,7 +356,7 @@ def remove_duplicate_cluster(cluster_case_classification_analysis):
     # Collect clusters labeled as 'Admin Issue'
     for cluster_id, case_dict in cluster_case_classification_analysis.items():
         if case_dict.get('insight_category') == 'Admin Issue':
-            admin_issue_list.append((cluster_id, case_dict.get('LV3', '')))
+            admin_issue_list.append((cluster_id, case_dict.get('lv3', '')))
 
     print("Total Admin Count - ", len(admin_issue_list))
     
@@ -385,60 +392,27 @@ def remove_duplicate_cluster(cluster_case_classification_analysis):
 
     for category_group in category_groups:
         cluster_ids = category_group.get("cluster_ids", [])
+        lv3_category_name = category_group.get("category_name", '')
         if not cluster_ids:
             continue
 
         print("Removed cluster Ids size", len(cluster_ids))
-        cluster_cases_str = ""
-        cluster_case_numbers = []
-        selected_cluster_id = cluster_ids[0]
 
+        cluster_case_numbers = []
+        selected_cluster_data = None
+        selected_clusder_id=0
         for cluster_id in cluster_ids:
             case_data = cluster_case_classification_analysis.pop(cluster_id, None)
             if case_data:
-                new_str = case_data.get("cluster_cases_str", "")
-                if len(new_str) > len(cluster_cases_str):
-                    cluster_cases_str = new_str
-                    
+                if not selected_cluster_data:
+                    selected_cluster_data = case_data
+                    selected_clusder_id = cluster_id                    
                 cluster_case_numbers.extend(case_data.get("case_numbers", []))
 
-        case_classification_prompt = case_prompt_template.format(
-            categories_info=categories_info,
-            tag_info=tag_info,
-            case_info=cluster_cases_str
-        )
-
-        message_history = [{
-            "role": "user",
-            "content": [{"type": "text", "text": case_classification_prompt}]
-        }]
-
-        try:
-            case_classification = adaptor.chat.completions.create(
-                pydantic_model=CaseClassification,
-                num_retries=25,
-                model="gpt-4o-mini",
-                messages=message_history,
-                max_tokens=4096,
-                stream=False
-            )
-        except Exception as e:
-            print(f"remove_duplicate_cluster - classification adaptor call error: {e}")
-            traceback.print_exc()
-            case_classification = None
-
-        if case_classification:
-            classification_data = case_classification.model_dump()
-            classification_data['customer_query'] = clean_control_chars(classification_data.get('customer_query',''))
-            classification_data['case_summary'] = clean_control_chars(classification_data.get('case_summary',''))
-            classification_data['case_root_cause'] = clean_control_chars(classification_data.get('case_root_cause',''))
-            classification_data['custcase_recommendationomer_query'] = clean_control_chars(classification_data.get('case_recommendation',''))
-
-            classification_data['case_numbers'] = cluster_case_numbers
-            classification_data['case_count'] = len(cluster_case_numbers)
-            classification_data['cluster_cases_str'] = cluster_cases_str
-
-            cluster_case_classification_analysis[selected_cluster_id] = classification_data
+        if selected_cluster_data:
+            selected_cluster_data['case_numbers'] = cluster_case_numbers
+            selected_cluster_data['case_count'] = len(cluster_case_numbers)
+            cluster_case_classification_analysis[selected_clusder_id] = selected_cluster_data
 
     return cluster_case_classification_analysis
 
@@ -449,9 +423,31 @@ def analysis_process(file_name):
         
         # Load data
         df = pd.read_excel(input_file_name)
-        #df = df.sample(n=5000, random_state=42)  # Limit rows for analysis
-        df = df[df['Status'] == 'Closed']  # Only closed cases
-	    #df = df[df['Customer Asset'].str.contains('ProcessPro Premier', case=False, na=False)]
+        #df = df.sample(n=1000, random_state=42)  # Limit rows for analysis
+        #df = df[df['Status'] == 'Closed']  # Only closed cases
+        
+        # Traverse Global
+        #df = df[df['Customer Asset'].str.contains('OSAS', case=False, na=False)]
+        #df = df[df['Customer Asset'].str.contains('Traverse', case=False, na=False)]
+
+        # ProcessPro
+        #df = df[df['Customer Asset'].str.contains('Global', case=False, na=False)]
+        #df = df[df['Customer Asset'].str.contains('Premier', case=False, na=False)]
+
+        #Gould Hall
+        #df = df[~df['Account Name'].str.contains('Headlam', case=False, na=False)]
+
+        #Apprise
+        #df = df[~df['Service Team'].str.contains('Apprise-EDI', case=False, na=False)]
+
+        # Just Food & bc food
+        datetime_format = "%m/%d/%Y %I:%M %p"
+        df['datetime_opened_dt'] = pd.to_datetime(df['Date/Time Opened'], format=datetime_format, errors='coerce')
+
+        df = df[
+            (df['Status'] == 'Closed') &
+            (df['datetime_opened_dt'] >= pd.Timestamp("2025-01-01"))
+        ]
 
         df_copy = df.copy()
 
@@ -485,13 +481,9 @@ def analysis_process(file_name):
                 cluster_id, result = future.result()
                 if result:
                     cluster_case_classification_analysis[cluster_id] = result
-
-        #intermediate_df = pd.DataFrame.from_dict(cluster_case_classification_analysis, orient='index').reset_index(drop=True)
-        #intermediate_df.to_excel("intermediate_df.xlsx")
-        
+    
         # Deduplicate Admin Issue clusters
         cluster_case_classification_analysis = remove_duplicate_cluster(cluster_case_classification_analysis)
-
         cluster_case_classification_analysis = remove_duplicate_cluster(cluster_case_classification_analysis)
 
         print(f"Final Cluster size -- {len(cluster_case_classification_analysis)}")
@@ -541,12 +533,13 @@ def analysis_process(file_name):
                 case_dict['case_severity_distribution'] = ""
 
             # Product versions
-            versions = cluster_df.get('product_version_name', pd.Series()).dropna().unique().tolist()
+            versions = cluster_df.get('product_version_name', pd.Series()).dropna().unique().astype(str).tolist()
             case_dict['product_version_name'] = ', '.join(versions) if versions else ""
 
         # Generate KB summaries
         for case_dict in cluster_case_classification_analysis.values():
             case_dict.update({
+                "kb_status": "",
                 "kb_article_number": "",
                 "kb_title": "",
                 "kb_problem": "",
@@ -573,12 +566,22 @@ def analysis_process(file_name):
                     print(f"Generate KB summaries - error: {e}")
                     traceback.print_exc()
 
-
                 if kb_article:
-                    case_dict["kb_article_number"] = kb_article.get('article_number', '')
+                    raw_article_number = kb_article.get('article_number', None)
+                    article_number = str(raw_article_number) if raw_article_number is not None else ""
+
+                    if article_number == "" or len(article_number) <= 1:
+                        case_dict["kb_status"] = "New KB"
+                        article_number = ""
+                    else:
+                        case_dict["kb_status"] = "Updating existing KB"
+
+                    case_dict["kb_article_number"] = article_number
                     case_dict["kb_title"] = clean_control_chars(kb_article.get('title', ''))
                     case_dict["kb_problem"] = clean_control_chars(kb_article.get('problem', ''))
                     case_dict["kb_solution"] = clean_control_chars(kb_article.get('solution', ''))
+            else:
+                case_dict["kb_status"] = "No KB recommendation"
 
         # Save Excel output
         product_name = df['product_line'].iloc[0]
@@ -590,9 +593,9 @@ def analysis_process(file_name):
         with pd.ExcelWriter(output_file_name, engine='openpyxl') as writer:
             # Full detailed output
             custom_column_names = {
-                'LV1': 'LV1',
-                'LV2': 'LV2',
-                'LV3': 'LV3',
+                'lv1': 'LV1',
+                'lv2': 'LV2',
+                'lv3': 'LV3',
                 'insight_category': 'Insight Category',
                 'case_summary': 'Case Summary',
                 'case_root_cause': 'Root Cause',
@@ -612,6 +615,7 @@ def analysis_process(file_name):
                 'case_severity_distribution': 'Case Severity Distribution',
                 "kb_candidate": 'Knowledge Base Candidate',
                 'kb_article_number': 'KB Article Number',
+                'kb_status': 'KB Status',
                 'kb_title': 'KB Title',
                 'kb_problem': 'KB Problem',
                 'kb_solution': 'KB Solution'
@@ -628,7 +632,7 @@ def analysis_process(file_name):
                 category_df = result_df[result_df['insight_category'] == category].copy()
                 category_df = category_df[
                     [
-                        'LV3', 'case_summary', 'case_root_cause', 'case_recommendation', 'case_numbers',
+                        'lv3', 'case_summary', 'case_root_cause', 'case_recommendation', 'case_numbers',
                         'case_count', 'product_version_name', 'avg_resolution_days', 'median_resolution_days',
                         'avg_satisfaction_score', 'median_satisfaction_score',
                         'ticket_distribution', 'top_5_customers', 'case_severity_distribution'
@@ -636,7 +640,7 @@ def analysis_process(file_name):
                 ].sort_values(by='case_count', ascending=False)
 
                 category_df.rename(columns={
-                        'LV3': category,
+                        'lv3': category,
                         'case_summary': 'Case Summary',
                         'case_root_cause': 'Root Cause',
                         'case_recommendation': 'Recommendation',
@@ -658,7 +662,7 @@ def analysis_process(file_name):
             if not kb_df.empty:
                 kb_df = kb_df[
                     [
-                        'kb_article_number', 'kb_title', 'kb_problem', 'kb_solution', 'case_summary', 'case_root_cause',
+                        'kb_status', 'kb_article_number', 'kb_title', 'kb_problem', 'kb_solution', 'case_summary', 'case_root_cause',
                         'case_recommendation', 'case_numbers', 'case_count', 'product_version_name',
                         'avg_resolution_days', 'median_resolution_days',
                         'avg_satisfaction_score', 'median_satisfaction_score',
@@ -667,6 +671,7 @@ def analysis_process(file_name):
                 ].sort_values(by='case_count', ascending=False)
 
                 kb_df.rename(columns={
+                        'kb_status': 'KB Status',
                         'kb_article_number': 'KB Article Number',
                         'kb_title': 'KB Title',
                         'kb_problem': 'KB Problem',
@@ -698,10 +703,75 @@ def analysis_process(file_name):
 
 if __name__ == "__main__":
 
-    erp_names = [
-        'Made2Manage',
-    ]
+    #erp_names2 = ["Oxaion ERP","Syncos MES","Swords","Made2Manage","Produce Pro ERP","Ross"]
 
+    # erp_names3 = [
+    #     #'Traverse Global',
+    #     #'ProcessPro',
+    #     #'Paragon_Flexipod',
+    #     #'Paragon_HDX',
+    #     #'Paragon_Application',
+    # ]
+
+    ''' erp_names = [
+        "Ramsauer & Sturmer",
+        "Affinitus FreshWare",
+        "Affinitus GrowMaster",
+        "Respond",
+        "Prima Solutions ERP",
+        "Affinitus ChefServe",
+        "Elucid",
+        "3T Logistics",
+        "Patch OEE",
+        "Lascom PLM",
+        "API Pro",
+        "TOTALogistix",
+        "RLM ERP",
+        "Full Circle ERP",
+        "WorkWise ERP",
+        "JustFood",
+        "Momentis Systems",
+        "Catalyst",
+        "Aptean Food and Beverage",
+        "Exenta ERP",
+        "AssetPoint",
+        "EDI Direct",
+        "Aptean Business Solutions",
+        "Apparel Business Systems",
+        "EquipSoft",
+        "Foodware BC",
+        "Factory",
+        "Aptean EAM",
+        "LINKFRESH 365 Business Central",
+        "Drink-IT",
+        "bc Food",
+        "UnityF8",
+        "Cimdata ERP",
+        "Proteus",
+        "Calidus",
+        "Logis ERP",
+        "Southware",
+        "Intuitive",
+        "Aptean Retail Planning",
+        "Master Distribution System",
+        "Aptean Retail PLM",
+        "Global Service",
+        "Impress",
+        "irms360",
+        "Encompix",
+        "ImPuls",
+        "trend SWM"
+    ]'''
+    #erp_names = ["Impress","WorkWise ERP","Unity","Apprise"]
+    #erp_names =["Apprise"]
+    
+    erp_names = [
+        #"Impress",
+        #"WorkWise ERP",
+        'bc Food',
+        'JustFood'
+    ]
+    
     for erp_name in erp_names:
         try:
             file_name = f"{erp_name}_case_list.xlsx"

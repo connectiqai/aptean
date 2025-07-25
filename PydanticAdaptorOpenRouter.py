@@ -1,11 +1,10 @@
 import copy
 import json
-from pydantic import ValidationError
 
+from pydantic import ValidationError
 from openai import OpenAI
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 class PydanticAdaptorOpenRouter:
@@ -46,10 +45,8 @@ class PydanticAdaptorOpenRouter:
         return tool_definition
 
     def _parse_tool_call_response(self, chat_completion_response):
-        # assuming n is always 1
+        
         response = chat_completion_response.choices[0]
-        # if response.finish_reason != "tool_calls":
-        #     raise ValueError(f"The model completion did not return a tool use block. Here is the full response - {chat_completion_response}")
 
         tool_calls = response.message.tool_calls
         if tool_calls is None or len(tool_calls) <= 0:
@@ -117,6 +114,7 @@ class PydanticAdaptorOpenRouter:
         validation_error_details = None
         parsed_tool_call_response = None
         curr_try = 0
+        
         #NOTE total allowed tries is initial_try(1) + num_retries
         while (not fit_pydantic_model and curr_try <= num_retries):
             try:
